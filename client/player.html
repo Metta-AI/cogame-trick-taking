@@ -32,10 +32,8 @@
 <script>
   var canvas = document.getElementById("table");
   function fit() {
-    var parent = canvas.parentElement;
-    canvas.width = canvas.clientWidth || (parent && parent.clientWidth) || 960;
-    canvas.height = canvas.clientHeight || (parent && parent.clientHeight) ||
-      640;
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
   }
   window.addEventListener("resize", fit);
   window.addEventListener("load", fit);
