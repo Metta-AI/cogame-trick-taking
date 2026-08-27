@@ -168,14 +168,37 @@
     var words = String(text).split(/\s+/);
     var lines = [];
     var line = "";
-    words.forEach(function (word) {
-      var probe = line ? line + " " + word : word;
-      if (ctx.measureText(probe).width > maxWidth && line) {
-        lines.push(line);
-        line = word;
-      } else {
-        line = probe;
+    // A single token wider than the box - a run of suit glyphs, a long id -
+    // is the one thing word wrapping cannot place, so it is broken on rune
+    // boundaries instead of being cut with an ellipsis.
+    function chunks(word) {
+      if (ctx.measureText(word).width <= maxWidth) return [word];
+      var runes = Array.from(word);
+      var out = [];
+      var start = 0;
+      while (start < runes.length) {
+        var take = runes.length - start;
+        var piece = runes.slice(start, start + take).join("");
+        while (take > 1 && ctx.measureText(piece).width > maxWidth) {
+          take = Math.max(1, Math.min(take - 1, Math.floor(take *
+            (maxWidth / ctx.measureText(piece).width))));
+          piece = runes.slice(start, start + take).join("");
+        }
+        out.push(piece);
+        start += take;
       }
+      return out;
+    }
+    words.forEach(function (word) {
+      chunks(word).forEach(function (part) {
+        var probe = line ? line + " " + part : part;
+        if (ctx.measureText(probe).width > maxWidth && line) {
+          lines.push(line);
+          line = part;
+        } else {
+          line = probe;
+        }
+      });
     });
     if (line) lines.push(line);
     var overflow = lines.length > maxLines;
@@ -195,14 +218,43 @@
   // what makes the seeded seating visible on the board.
   var ANCHORS = ["S", "W", "N", "E"];
 
-  function computeLayout(w, h) {
+  // The notes band is derived from the cap the SERVER enforces, not from
+  // eye. `notes` is truncated to MaxNotesLen runes (src/tricks/types.nim),
+  // so a seat can hand the viewer a 400-rune paragraph at any moment; the
+  // parchment reserves room for one of exactly that length, measured in the
+  // font the note is drawn in, whether or not the seat has written anything.
+  // Undersizing it cuts a model's sentence mid-word, which is the defect
+  // this reserve exists to prevent.
+  var NOTES_CAP_RUNES = 400;
+  // Measuring the cap needs a string of cap length: this alphabet is the one
+  // notes are written in (prose, digits, the suit glyphs and the em-dash the
+  // prompt uses), and its mean advance in the note font is deliberately
+  // wider than running prose, which is mostly lower case and spaces.
+  var NOTE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
+    "abcdefghijklmnopqrstuvwxyz0123456789 ,.;:'?!-\u2014\u2660\u2665\u2666\u2663";
+
+  function computeLayout(ctx, w, h) {
     var pad = Math.max(6, Math.min(w, h) * 0.02);
     var scale = Math.max(0.55, Math.min(1.25, Math.min(w / 960, h / 640)));
     var cardH = Math.max(26, Math.min(h * 0.13, 74 * scale));
     var cardW = cardH * 0.7;
     var cog = Math.max(26, Math.min(72 * scale, h * 0.12));
-    var noteLines = h < 480 ? 1 : 2;
-    var noteH = noteLines * 11 * scale + 8 * scale;
+    var notePad = 4 * scale;
+    var noteLineH = 11 * scale;
+    var notePx = Math.round(9.5 * scale);
+    // Wide enough that a full-cap note is a paragraph and not a column.
+    var noteW = Math.min(w * 0.46, Math.max(w * 0.3, cog * 4.6));
+    ctx.save();
+    ctx.font = notePx + "px " + UI_FONT;
+    var advance = ctx.measureText(NOTE_ALPHABET).width /
+      Array.from(NOTE_ALPHABET).length;
+    ctx.restore();
+    var capW = advance * NOTES_CAP_RUNES;
+    // +1 line of slack: wrapping breaks on words, so every line but the last
+    // gives up to one word's width back.
+    var noteLines = Math.max(2,
+      Math.ceil(capW / Math.max(24, noteW - notePad * 2)) + 1);
+    var noteH = noteLines * noteLineH + notePad * 2;
     var cx = w / 2;
     var cy = h / 2 - cardH * 0.15;
     var seats = {};
@@ -219,7 +271,8 @@
     return {
       w: w, h: h, pad: pad, scale: scale, cardW: cardW, cardH: cardH,
       cog: cog, cx: cx, cy: cy, seats: seats, noteLines: noteLines,
-      noteH: noteH
+      noteH: noteH, noteW: noteW, notePad: notePad, noteLineH: noteLineH,
+      notePx: notePx
     };
   }
 
@@ -293,13 +346,30 @@
 
   function drawParchment(ctx, cv, x, y, w, layout, text) {
     var scale = layout.scale;
-    var pad = 4 * scale;
-    var lineH = 11 * scale;
+    var pad = layout.notePad;
+    var lineH = layout.noteLineH;
     var h = layout.noteH;
     ctx.save();
-    ctx.font = Math.round(9.5 * scale) + "px " + UI_FONT;
-    var lines = text ? wrapLines(ctx, text, w - pad * 2, layout.noteLines) :
-      [];
+    var px = layout.notePx;
+    var lines = [];
+    if (text) {
+      // The band holds a cap-length note in the nominal font. A note whose
+      // glyphs run wider than that (a suit-glyph-heavy remark) is set a
+      // point smaller until it fits the reserved lines: the sentence is
+      // never cut, and the band keeps its size, so the scene does not jump.
+      var floorPx = Math.max(4, Math.round(layout.notePx * 0.6));
+      ctx.font = px + "px " + UI_FONT;
+      lines = wrapLines(ctx, text, w - pad * 2, 9999);
+      while (lines.length > layout.noteLines && px > floorPx) {
+        px -= 1;
+        ctx.font = px + "px " + UI_FONT;
+        lines = wrapLines(ctx, text, w - pad * 2, 9999);
+      }
+      if (lines.length > layout.noteLines) {
+        lines = wrapLines(ctx, text, w - pad * 2, layout.noteLines);
+      }
+    }
+    ctx.font = px + "px " + UI_FONT;
     ctx.fillStyle = text ? "rgba(242, 232, 216, 0.92)" :
       "rgba(242, 232, 216, 0.08)";
     ctx.strokeStyle = text ? CARD_EDGE : "rgba(242, 232, 216, 0.16)";
@@ -313,7 +383,7 @@
       ctx.fillStyle = INK;
       lines.forEach(function (line, i) {
         drawText(ctx, cv, line, x + pad, y + pad + i * lineH, w - pad * 2,
-          9.5 * scale, "left");
+          px, "left");
       });
     } else {
       ctx.fillStyle = GHOST;
@@ -407,8 +477,9 @@
         view.alone ? "ALONE" : "MAKER", COLOR_HEX[color], scale);
     }
 
-    // Notes parchment, always reserved: notes arrive without warning.
-    var noteW = Math.min(layout.w * 0.3, size * 3.2);
+    // Notes parchment, always reserved: notes arrive without warning, and
+    // the band is the cap-sized one computeLayout measured.
+    var noteW = layout.noteW;
     var noteX = Math.max(2, Math.min(spot.cog.x - noteW / 2,
       layout.w - noteW - 2));
     var noteY = anchor === "N" ? labelY + namePx * 2.6 :
@@ -553,7 +624,7 @@
     if (w < 32 || h < 32) return;
     var seats = view.seats || [];
     var now = view.now || Date.now();
-    var layout = computeLayout(w, h);
+    var layout = computeLayout(ctx, w, h);
     var fx = view.effects || { trickAt: null, trickWinner: -1 };
 
     var floor = images["arena_floor.png"];

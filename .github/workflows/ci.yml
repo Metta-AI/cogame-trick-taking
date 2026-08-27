@@ -483,6 +483,16 @@ jobs:
             --strict-text-bounds \
             --out dist/renderer-smoke
 
+      # `--strict-text-bounds` gates never_inside and only REPORTS
+      # `ellipsized`, which cannot on its own tell a nameplate's ellipsis
+      # (a design choice) from a model's sentence cut mid-word (a defect).
+      # This step reads the fixture's own capped strings and fails if any
+      # drawn piece of them ends in an ellipsis that is not the string's own
+      # tail -- i.e. if the reserved notes band is smaller than the cap the
+      # server enforces.
+      - name: The notes band fits the server's cap
+        run: node tools/ci/notes_fit_check.mjs --fixture dist/renderer-fixture
+
       - name: Upload the viewer smoke evidence
         # Always: the screenshot and the JSON are most useful when the job is red.
         if: always()

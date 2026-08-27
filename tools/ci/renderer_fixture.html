@@ -87,6 +87,11 @@
   if (runes(NOTES) !== 400) { fail("notes is " + runes(NOTES) + " runes, want 400"); return; }
   if (runes(TELL) !== 120) { fail("tell is " + runes(TELL) + " runes, want 120"); return; }
 
+  // Published for tools/ci/notes_fit_check.mjs, which fails CI if the
+  // renderer ever draws a PIECE of one of these ending in an ellipsis that
+  // is not the string's own tail - i.e. if it cut a model's sentence to fit.
+  window.__FIXTURE_TEXT = { notes: NOTES, tell: TELL };
+
   var NAMES = ["Sprocket", "Gizmo", "Ratchet", "Widget"];
   var POLICIES = ["trick-taking-signaller", "trick-taking-counter",
     "Baseline (1)", "Baseline (2)"];
