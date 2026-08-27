@@ -58,6 +58,32 @@ proc playRandom(config: GameConfig, seed: int, checkLegality = false): Sim =
             "a legal card the seat does not hold"
       result.applyMove(legal[rng.rand(legal.high)], "", true)
 
+proc playRecording(config: GameConfig, seed: int,
+    live: var seq[(int, string)]): Sim =
+  ## One whole episode, recording the LIVE per-tick state the server
+  ## broadcasts after every applied move (`server.nim` calls
+  ## `frameStateJson` there and then discards it), paired with the number of
+  ## events the log carried at that instant. That pairing is what lets a
+  ## test compare frame by frame: `replayMatch(config, events)[n]` is the
+  ## table after the first `n` events, so it must equal the live state at
+  ## the tick where the log reached `n`.
+  var rng = initRand(int64(seed) * 7919 + 5)
+  result = initSim(config)
+  live.add((result.events.len, $result.frameStateJson()))
+  while not result.done:
+    let call = result.currentCall()
+    case call.kind
+    of ckDeal:
+      result.beginHand()
+    of ckNone:
+      break
+    of ckPass:
+      result.applyMove(passMove(randomPass(result, rng)), "", true)
+    else:
+      let legal = legalMoves(result)
+      result.applyMove(legal[rng.rand(legal.high)], "", true)
+    live.add((result.events.len, $result.frameStateJson()))
+
 proc eventsJson(events: seq[GameEvent]): string =
   var node = newJArray()
   for event in events:
@@ -534,6 +560,33 @@ suite "record then re-derive":
     let frames = replayMatch(sim.config, events)
     check frames.len == events.len + 1
     check $frames[^1].frameStateJson() == $sim.frameStateJson()
+
+  test "every intermediate live frame equals the re-derived frame at that tick":
+    ## The final frame agreeing is not the claim: the viewer plays the WHOLE
+    ## timeline, so every intermediate frame has to be the one the table
+    ## actually stood in. This records the live state after every applied
+    ## move -- the same `frameStateJson` the live server broadcasts and
+    ## throws away -- and checks it against the re-derived frame at the tick
+    ## where the event log reached the same length. A drift in any one hand
+    ## boundary, trick resolution or score update shows up here and nowhere
+    ## in the final-frame check.
+    for module in Modules:
+      var live: seq[(int, string)]
+      let sim = playRecording(
+        fixture(module, defaultHands(module), seed = 94), 11, live)
+      check sim.reason == "complete"
+      let frames = replayMatch(sim.config, roundTrip(sim.events))
+      check frames.len == sim.events.len + 1
+      ## Every module plays at least a hand's worth of ticks, so an empty
+      ## recording cannot pass this vacuously.
+      check live.len > 30
+      var compared = 0
+      for (count, state) in live:
+        check count < frames.len
+        if count < frames.len:
+          check $frames[count].frameStateJson() == state
+          inc compared
+      check compared == live.len
 
   test "an episode that ended complete re-derives byte-identically":
     for module in Modules:
