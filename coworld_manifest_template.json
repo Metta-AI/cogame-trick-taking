@@ -247,7 +247,7 @@
           }
         },
         "bidsMade": {
-          "description": "Hands in which the slot made its bid exactly (or a made nil).",
+          "description": "Hands in which the slot made its bid, by that module's rule: spades counts at least the bid (making a spades contract is >=, not ==) plus a made nil; oh-hell counts exactly the bid, which is the whole game there. Always 0 in euchre and hearts, which bid no trick count.",
           "type": "array",
           "minItems": 4,
           "maxItems": 4,
