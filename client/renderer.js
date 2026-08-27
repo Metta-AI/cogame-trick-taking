@@ -594,23 +594,34 @@
     } else if (view.module === "hearts") {
       drawText(ctx, cv, "NO TRUMP", x, y, cw * 2.4, labelPx, "left");
     }
-    // Up-card / turn-up beside the kitty, top-right.
-    var extra = (typeof view.upcard === "number" && view.upcard >= 0) ?
-      view.upcard : ((typeof view.turnup === "number" && view.turnup >= 0) ?
+    // Up-card / turn-up beside the kitty, top-right. The euchre up-card is
+    // the top of the kitty only while it is still on the table: once the
+    // dealer orders it up it moves into the dealer's hand and out of the
+    // kitty (src/tricks/euchre.nim), and drawing it here as well would put
+    // one card on the board twice. Whatever is left of the kitty stays
+    // face-down beside it -- spectators see the cards, not their faces.
+    var kitty = view.kitty || [];
+    var upLive = typeof view.upcard === "number" && view.upcard >= 0 &&
+      kitty.indexOf(view.upcard) >= 0;
+    var extra = upLive ? view.upcard :
+      ((typeof view.turnup === "number" && view.turnup >= 0) ?
         view.turnup : -1);
-    if (extra >= 0) {
+    var backs = upLive ? kitty.length - 1 : kitty.length;
+    if (extra >= 0 || backs > 0) {
       var ex = layout.w - pad - layout.cog * 1.7 - cw;
       ctx.font = "600 " + labelPx + "px " + UI_FONT;
       ctx.fillStyle = GHOST;
-      drawText(ctx, cv, view.module === "euchre" ? "UP-CARD" : "TURN-UP",
+      drawText(ctx, cv, extra < 0 ? "KITTY" :
+        (view.module === "euchre" ? "UP-CARD" : "TURN-UP"),
         ex, y, cw * 2, labelPx, "left");
-      var kitty = view.kitty || [];
-      for (var k = 0; k < Math.max(0, kitty.length - 1); k++) {
+      for (var k = 0; k < backs; k++) {
         drawCardBack(ctx, ex - 8 * scale - k * 4 * scale,
           y + labelPx * 1.3 + k * 2, cw, ch, scale);
       }
-      drawCardFace(ctx, cv, ex, y + labelPx * 1.3, cw, ch, extra,
-        layout.scale, {});
+      if (extra >= 0) {
+        drawCardFace(ctx, cv, ex, y + labelPx * 1.3, cw, ch, extra,
+          layout.scale, {});
+      }
     }
     ctx.restore();
   }

@@ -160,9 +160,18 @@ proc euchreApply(sim: var Sim, move: Move, notes: string, scripted: bool)
       "stuck dealer" else: "")
     sim.addEvent(trumpEvent)
     if sim.bidRound == 1:
-      ## The dealer picks the up-card up and discards one face down.
+      ## The dealer picks the up-card up and discards one face down. It
+      ## leaves the kitty when it enters the hand: a card that is in both
+      ## places is drawn twice by any spectator view that shows the kitty
+      ## and the up-card side by side. `sim.upcard` keeps the value as the
+      ## record of WHICH card was turned up (the prompts, the tells and the
+      ## `hand` event all read it); `upcardLive` and the kitty are what say
+      ## whether it is still on the table.
       let dealer = sim.dealerSlot
       sim.deal[dealer] = sortedHand(sim.deal[dealer] & @[sim.upcard])
+      let inKitty = sim.kitty.find(sim.upcard)
+      if inKitty >= 0:
+        sim.kitty.delete(inKitty)
       sim.upcardLive = false
       sim.phase = phDiscard
       sim.actorPos = sim.dealer

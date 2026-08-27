@@ -301,6 +301,51 @@ suite "euchre rules":
             fixture("euchre", 8), 0)
         check abs(total) < 1e-9
 
+  test "the ordered-up card leaves the kitty when it joins the dealer's hand":
+    ## A card that is in the dealer's hand AND still in the kitty is drawn
+    ## twice by any spectator view that shows both -- the kitty backs and
+    ## the up-card face sit side by side in the corner of the felt.
+    let config = fixture("euchre", 8, seed = 55)
+    var sim = initSim(config)
+    sim.beginHand()
+    let upcard = sim.upcard
+    check sim.kitty.len == 4
+    check sim.kitty[0] == upcard
+    sim.applyMove(bidMove("order", 0, suitOf(upcard)), "", true)
+    check sim.phase == phDiscard
+    let dealer = sim.dealerSlot
+    check upcard in sim.deal[dealer]
+    check upcard notin sim.kitty
+    check sim.kitty.len == 3
+    check not sim.upcardLive
+    ## `upcard` keeps the value: it is the record of which card was turned
+    ## up, and the prompts, the tells and the `hand` event all read it.
+    check sim.upcard == upcard
+    ## Every one of the 24 cards is in exactly one place.
+    var seen = initHashSet[int]()
+    for slot in 0 ..< Seats:
+      for card in sim.deal[slot]:
+        check card notin seen
+        seen.incl(card)
+    for card in sim.kitty:
+      check card notin seen
+      seen.incl(card)
+    check seen.len == 24
+
+  test "a turned-down up-card stays in the kitty":
+    ## Round 2 means nobody ordered it up: the card was turned down, not
+    ## picked up, so it is still on the table.
+    let config = fixture("euchre", 8, seed = 41)
+    var sim = initSim(config)
+    sim.beginHand()
+    let upcard = sim.upcard
+    for _ in 0 ..< Seats:
+      sim.applyMove(bidMove("pass", 0, -1), "", true)
+    check sim.bidRound == 2
+    check not sim.upcardLive
+    check upcard in sim.kitty
+    check sim.kitty.len == 4
+
   test "stick the dealer forces a named suit and never a re-deal":
     let config = fixture("euchre", 8, seed = 41)
     var sim = initSim(config)
