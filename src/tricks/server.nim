@@ -312,15 +312,28 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## no request is issued, so no spacing is owed and nothing is a
       ## fallback. That is what keeps offline certification and the docker
       ## smoke finishing in a second rather than in ten minutes.
-      let modelPath = not seatScripted and not client.disabled
+      var modelPath = not seatScripted and not client.disabled
       if modelPath:
         ## Decision-start to decision-start spacing floor.
         let spacing = (DecisionSpacingMs + client.extraSpacingMs).float / 1000.0
         let wait = lastDecisionAt + spacing - epochTime()
         if wait > 0:
           sleep(int(wait * 1000))
-        lastDecisionAt = epochTime()
-        inc modelCalls
+        ## The guards above were read BEFORE that sleep, and a throttled
+        ## episode's spacing floor is measured in seconds. Read them again,
+        ## and refuse a call whose own worst case (one attempt, one retry)
+        ## would not return before the hard deadline: the episode has to
+        ## settle inside the budget, not just start settling inside it.
+        let now = epochTime()
+        if now > softDeadline or
+            now + client.worstCaseCallSeconds() > hardDeadline:
+          if stopReason.len == 0:
+            stopReason = "deadline"
+          seatScripted = true
+          modelPath = false
+        else:
+          lastDecisionAt = now
+          inc modelCalls
 
       ## The slow part (Claude) runs outside the lock on a snapshot; only
       ## this thread mutates the sim, so the snapshot cannot go stale.

@@ -32,6 +32,11 @@ const
   ## sidecar's ~30 rpm per-episode cap.
   DecisionSpacingMs* = 2200
   ThrottleExtraMs* = 500
+  ## Ceiling on the 429 backoff. The spacing floor is a wait like any other,
+  ## so it has to be bounded by something the deadline can accommodate:
+  ## uncapped, a long throttle storm grows it without limit and the last
+  ## decision of an episode sleeps past the settle.
+  MaxExtraSpacingMs* = 3000
   Baselines* = ["follow", "tracker"]
 
 type
@@ -131,6 +136,18 @@ proc newLlmClient*(config: GameConfig): LlmClient =
     result.transport = ltNone
     result.disabled = true
     echo "trick-taking llm: no LLM credentials; using scripted fallback"
+
+proc noteThrottled*(client: LlmClient) =
+  ## A 429 raises the decision spacing for the rest of the episode, up to
+  ## MaxExtraSpacingMs.
+  client.extraSpacingMs =
+    min(client.extraSpacingMs + ThrottleExtraMs, MaxExtraSpacingMs)
+
+proc worstCaseCallSeconds*(client: LlmClient): float =
+  ## The longest a single `decide` can take on the model path: one attempt,
+  ## one retry, each bounded by the transport timeout. The caller uses it to
+  ## refuse a call that would not return before the hard deadline.
+  (2 * client.timeoutSeconds).float
 
 # ---- Scripted baselines -----------------------------------------------------
 #
@@ -972,7 +989,7 @@ proc completeText(client: LlmClient, system, user: string): string =
       "llm auth failed (" & $response.code & ") at " & url & ": " & detail)
   if response.code == 429:
     let detail = response.body[0 .. min(response.body.high, 300)]
-    client.extraSpacingMs = client.extraSpacingMs + ThrottleExtraMs
+    client.noteThrottled()
     discard client.tryNextBedrockModel("throttled")
     raise newException(TricksError, "llm throttled (429): " & detail)
   if response.code < 200 or response.code >= 300:

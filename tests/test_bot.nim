@@ -135,6 +135,27 @@ suite "degrade, never hang":
     check moveIsLegal(sim, decision.move)
     check decision.notes.len == 0
 
+  test "the 429 backoff and one call's worst case are both bounded":
+    ## Every wait on the model path has to be a number the deadline can
+    ## accommodate. The spacing floor a 429 raises is capped, and the call
+    ## itself is at most one attempt plus one retry, so the last decision an
+    ## episode starts cannot run past the hard guard.
+    var config = fixture("euchre", 61)
+    let client = newLlmClient(config)
+    for _ in 0 ..< 500:
+      client.noteThrottled()
+    check client.extraSpacingMs == MaxExtraSpacingMs
+    check client.worstCaseCallSeconds() ==
+      (2 * config.llmTimeoutSeconds).float
+    ## The whole of one decision: the spacing floor at its ceiling plus the
+    ## call itself. runGame refuses to START a decision unless this much
+    ## time remains before the hard guard, so the bound is what keeps the
+    ## settle inside the episode budget.
+    let worstDecision =
+      (DecisionSpacingMs + client.extraSpacingMs).float / 1000.0 +
+      client.worstCaseCallSeconds()
+    check worstDecision < 60.0
+
   test "an unparseable reply is rejected and the baseline move is legal":
     for module in Modules:
       var config = fixture(module, 31)
