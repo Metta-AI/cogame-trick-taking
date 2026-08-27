@@ -108,11 +108,20 @@
     });
   }
 
+  // Cosmetic truncation to fit a box. Rune-safe: a JS string slices in
+  // UTF-16 CODE UNITS, so trimming one unit off an astral character (a model
+  // is free to put an emoji or a playing-card glyph in its notes) leaves a
+  // lone surrogate on the canvas. Every string that reaches the replay is
+  // already cut on RUNE boundaries by truncateRunes (src/tricks/types.nim);
+  // the viewer's own cut holds to the same rule.
   function ellipsize(ctx, text, maxWidth) {
     if (ctx.measureText(text).width <= maxWidth) return text;
+    var runes = Array.from(text);
     var cut = text;
-    while (cut.length > 1 && ctx.measureText(cut + "…").width > maxWidth) {
-      cut = cut.slice(0, -1);
+    while (runes.length > 1 &&
+        ctx.measureText(cut + "…").width > maxWidth) {
+      runes.pop();
+      cut = runes.join("");
     }
     return cut + "…";
   }

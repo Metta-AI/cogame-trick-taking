@@ -74,6 +74,14 @@
   var TELL = cap("Nil: not one card that can win a trick. Partner, cover " +
     "\u2014 and read the lead, because it is all I can say. ", 120);
 
+  // One alias carries an ASTRAL rune (U+1F0A1, the ace of spades). A model
+  // is free to write one into its notes, and an alias is the string most
+  // often ellipsized to fit a box -- so this is where a UTF-16 slice shows
+  // up: trimming one code unit off it leaves a lone surrogate on the canvas.
+  // tools/ci/notes_fit_check.mjs fails on a lone surrogate in any drawn
+  // string and asserts this rune was drawn, so the check is not vacuous.
+  var ASTRAL = "\uD83C\uDCA1";
+
   function fail(message) {
     document.documentElement.setAttribute("data-replay-error", message);
     var loading = document.getElementById("loading");
@@ -90,9 +98,9 @@
   // Published for tools/ci/notes_fit_check.mjs, which fails CI if the
   // renderer ever draws a PIECE of one of these ending in an ellipsis that
   // is not the string's own tail - i.e. if it cut a model's sentence to fit.
-  window.__FIXTURE_TEXT = { notes: NOTES, tell: TELL };
+  window.__FIXTURE_TEXT = { notes: NOTES, tell: TELL, astral: ASTRAL };
 
-  var NAMES = ["Sprocket", "Gizmo", "Ratchet", "Widget"];
+  var NAMES = ["Sprocket", "Gizmo", "Ratchet" + ASTRAL, "Widget"];
   var POLICIES = ["trick-taking-signaller", "trick-taking-counter",
     "Baseline (1)", "Baseline (2)"];
   var SEAT_ORDER = [2, 0, 3, 1];   // table position -> slot

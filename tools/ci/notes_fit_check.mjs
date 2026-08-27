@@ -120,6 +120,20 @@ if (!capped || !capped.notes || !capped.tell) {
     "{notes, tell}; without the cap strings nothing here can be checked");
 }
 const CAPS = [["notes", capped.notes], ["tell", capped.tell]];
+if (!capped.astral) {
+  die(1, "::error::the fixture does not publish an astral rune; the " +
+    "lone-surrogate check below would be vacuous");
+}
+
+// A lone surrogate is what a UTF-16 slice leaves behind when it cuts an
+// astral rune in half. Every string that reaches the replay is truncated on
+// RUNE boundaries server-side (truncateRunes, src/tricks/types.nim); the
+// viewer's own cosmetic cut has to hold to the same rule, or a model that
+// writes one emoji gets a replacement glyph on the canvas.
+const LONE_SURROGATE =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])([\uDC00-\uDFFF])/;
+let surrogates = 0;
+let astralDraws = 0;
 
 // The fixture cycles its own canvas sizes on a timer; drive them here so
 // every size is measured deliberately and reported by name.
@@ -160,6 +174,20 @@ for (const [w, h] of sizes) {
     }
   }
   checked += seen;
+
+  const split = new Map();
+  for (const text of drawn) {
+    if (text.includes(capped.astral)) astralDraws += 1;
+    if (LONE_SURROGATE.test(text)) split.set(text, (split.get(text) || 0) + 1);
+  }
+  if (split.size) {
+    surrogates += split.size;
+    console.log(`::error::${w}x${h}: ${split.size} drawn string(s) carry a ` +
+      `lone surrogate -- a cut landed inside an astral rune`);
+    for (const [text, count] of split) {
+      console.log(`::error::  ${count} draw(s): ${JSON.stringify(text)}`);
+    }
+  }
   if (bad.size) {
     cuts += bad.size;
     console.log(`::error::${w}x${h}: the renderer cut ${bad.size} model ` +
@@ -181,6 +209,14 @@ await new Promise((done) => server.close(done));
 if (errorAttr) die(1, `::error::fixture reported data-replay-error: ${errorAttr}`);
 if (errors.length) die(1, `::error::uncaught page error: ${errors[0]}`);
 if (cuts > 0) die(1, `::error::${cuts} mid-string cut(s); widen the notes band`);
+if (surrogates > 0) {
+  die(1, `::error::${surrogates} drawn string(s) cut an astral rune in half; ` +
+    `the renderer must ellipsize on rune boundaries`);
+}
+if (astralDraws === 0) {
+  die(1, "::error::the fixture's astral rune was never drawn: the " +
+    "lone-surrogate check covered nothing");
+}
 if (checked === 0) {
   die(1, "::error::no capped string was ever drawn with an ellipsis: the " +
     "fixture is not exercising the notes/tell chrome any more");

@@ -532,7 +532,12 @@ jobs:
       # drawn piece of them ends in an ellipsis that is not the string's own
       # tail -- i.e. if the reserved notes band is smaller than the cap the
       # server enforces.
-      - name: The notes band fits the server's cap
+      # It also fails on a LONE SURROGATE in any drawn string: the fixture
+      # gives one alias an astral rune, and a cut that lands between the two
+      # halves of it would put a replacement glyph on the canvas. Every
+      # string that reaches the replay is cut on rune boundaries server-side
+      # (truncateRunes); the viewer's own cosmetic cut holds to the same rule.
+      - name: The notes band fits the server's cap, and cuts are rune-safe
         run: node tools/ci/notes_fit_check.mjs --fixture dist/renderer-fixture
 
       - name: Upload the viewer smoke evidence
