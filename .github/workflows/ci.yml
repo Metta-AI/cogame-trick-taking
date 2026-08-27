@@ -149,6 +149,18 @@ jobs:
           done
           exit "${fail}"
 
+      # Acceptance checklist item 7, second clause: the baselines' bidding
+      # thresholds are the output of a grid sweep, not guesses. The harness
+      # is a gate as well as a record -- it exits non-zero if any grid point
+      # beats the shipped configuration by more than the noise band, so a
+      # hand-edited threshold turns this step red. docs/tuning.md is the
+      # committed output of exactly this command.
+      - name: Baseline tuning sweep (grid harness)
+        run: |
+          set -euo pipefail
+          nim r --hints:off -d:release --path:src tools/ci/tune_baselines.nim \
+            --matches 96
+
       # The committed worst-case replay the wasm-viewer job plays in a
       # browser. tests/test_sim.nim regenerates it with this same proc and
       # DIFFS it against the committed bytes, so it can never drift from the

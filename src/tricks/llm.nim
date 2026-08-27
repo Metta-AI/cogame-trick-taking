@@ -135,8 +135,31 @@ proc newLlmClient*(config: GameConfig): LlmClient =
 # ---- Scripted baselines -----------------------------------------------------
 #
 # `follow` is the default and the move played whenever an LLM decision
-# fails. `tracker` is identical except for four overrides, each computed
+# fails. `tracker` is identical except for its overrides, each computed
 # from public information. Both select ONLY from legalMoves.
+#
+# The bidding thresholds below are the ones the grid sweep in
+# `tools/ci/tune_baselines.nim` selected; `docs/tuning.md` records the swept
+# grid and the head-to-head result that chose them, and
+# `tests/test_tuning.nim` pins the chosen values to that record. They are
+# parameters of the bid, not of the play, so a sweep can vary them per seat
+# without touching anything else.
+
+type
+  BaselineParams* = object
+    orderAt*: int      ## euchre: order the up-card at this hand strength
+    aloneAt*: int      ## euchre: go alone at this hand strength
+    spadesShade*: int  ## spades: bid this many under the winner count
+    ohHellDrop*: int   ## oh-hell: an off-suit ace in a suit this short is
+                       ## not counted as a winner (0 disables the rule)
+
+proc baselineParams*(baseline: string): BaselineParams =
+  ## The tuned configuration. Changing a number here without re-running
+  ## tools/ci/tune_baselines.nim fails tests/test_tuning.nim.
+  if baseline == "tracker":
+    BaselineParams(orderAt: 10, aloneAt: 16, spadesShade: 0, ohHellDrop: 2)
+  else:
+    BaselineParams(orderAt: 10, aloneAt: 16, spadesShade: 0, ohHellDrop: 0)
 
 proc handSuitCount(hand: seq[int], suit, trump: int, euchre: bool): int =
   for card in hand:
@@ -409,10 +432,10 @@ proc followChoice(sim: Sim, legal: seq[int], tracker: bool): int =
       return sim.cheapestWinner(winners)
     lowestOf(legal)
 
-proc scriptedEuchreBid(sim: Sim, legal: seq[Move], tracker: bool): Move =
+proc scriptedEuchreBid(sim: Sim, legal: seq[Move], params: BaselineParams): Move =
   let slot = sim.actorSlot
-  let orderAt = (if tracker: 12 else: 10)
-  let aloneAt = (if tracker: 18 else: 16)
+  let orderAt = params.orderAt
+  let aloneAt = params.aloneAt
   let upSuit = suitOf(sim.upcard)
   proc allowed(action: string, suit: int): bool =
     for move in legal:
@@ -456,7 +479,7 @@ proc scriptedEuchreBid(sim: Sim, legal: seq[Move], tracker: bool): Move =
     return bidMove("pass", 0, -1)
   legal[0]
 
-proc scriptedSpadesBid(sim: Sim, legal: seq[Move], tracker: bool): Move =
+proc scriptedSpadesBid(sim: Sim, legal: seq[Move], params: BaselineParams): Move =
   let hand = sim.deal[sim.actorSlot]
   var aces = 0
   var kings = 0
@@ -477,11 +500,9 @@ proc scriptedSpadesBid(sim: Sim, legal: seq[Move], tracker: bool): Move =
   let canNil = winners == 0 and not topSpade and spades <= 3
   if canNil:
     return bidMove("bid", 0, -1)
-  if tracker:
-    return bidMove("bid", max(0, min(13, winners - 1)), -1)
-  bidMove("bid", min(13, winners), -1)
+  bidMove("bid", max(0, min(13, winners - params.spadesShade)), -1)
 
-proc scriptedOhHellBid(sim: Sim, legal: seq[Move], tracker: bool): Move =
+proc scriptedOhHellBid(sim: Sim, legal: seq[Move], params: BaselineParams): Move =
   let hand = sim.deal[sim.actorSlot]
   let trump = sim.trump
   var winners = 0
@@ -489,7 +510,8 @@ proc scriptedOhHellBid(sim: Sim, legal: seq[Move], tracker: bool): Move =
     if suitOf(card) == trump and rankOf(card) >= RankQueen:
       inc winners
     elif rankOf(card) == RankAce and suitOf(card) != trump:
-      if tracker and handSuitCount(hand, suitOf(card), trump, false) <= 2:
+      if params.ohHellDrop > 0 and
+          handSuitCount(hand, suitOf(card), trump, false) <= params.ohHellDrop:
         discard
       else:
         inc winners
@@ -564,8 +586,10 @@ proc scriptedEuchreDiscard(sim: Sim, legal: seq[Move]): Move =
     pool = hand
   discardMove(lowestOf(pool))
 
-proc scriptedMove*(sim: Sim, baseline: string): Move =
-  ## Always legal, in every module and every phase.
+proc scriptedMove*(sim: Sim, baseline: string,
+    params: BaselineParams): Move =
+  ## Always legal, in every module and every phase. `params` is the tuned
+  ## bidding configuration; the shipped one is `baselineParams(baseline)`.
   let tracker = baseline == "tracker"
   let legal = legalMoves(sim)
   if legal.len == 0:
@@ -585,12 +609,16 @@ proc scriptedMove*(sim: Sim, baseline: string): Move =
     scriptedHeartsPass(sim)
   of phBid:
     case sim.module
-    of "euchre": scriptedEuchreBid(sim, legal, tracker)
-    of "spades": scriptedSpadesBid(sim, legal, tracker)
-    of "oh-hell": scriptedOhHellBid(sim, legal, tracker)
+    of "euchre": scriptedEuchreBid(sim, legal, params)
+    of "spades": scriptedSpadesBid(sim, legal, params)
+    of "oh-hell": scriptedOhHellBid(sim, legal, params)
     else: legal[0]
   else:
     raise newException(TricksError, "no decision is due")
+
+proc scriptedMove*(sim: Sim, baseline: string): Move =
+  ## The shipped configuration.
+  scriptedMove(sim, baseline, baselineParams(baseline))
 
 # ---- Prompt building --------------------------------------------------------
 
