@@ -582,10 +582,15 @@ body.feed-collapsed #feed { display: none; }
 @media (max-width: 720px) {
   #feed { display: none; }
 }
+/* Under 640px a plate has room for a name and a score and nothing else: the
+   "points" label and the pip strip come off first, so the name never has to
+   compete with them for the width. */
+@media (max-width: 640px) {
+  .plate-label { display: none; }
+  .plate-pips { display: none; }
+}
 @media (max-width: 400px) {
   #wordmark { font-size: 15px; }
   #clock { font-size: 12px; }
-  .plate-label { display: none; }
-  .plate-pips { display: none; }
   #modulechip { font-size: 9px; padding: 1px 4px; }
 }

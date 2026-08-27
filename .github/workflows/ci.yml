@@ -350,6 +350,11 @@ jobs:
           css = open("client/chrome.css").read()
           if "flex: 1 1 auto" not in css or "min-width: 3.2em" not in css:
               fail.append(".plate-name needs flex: 1 1 auto; min-width: 3.2em")
+          # ...and the plate's decorations come off before the name does.
+          m = re.search(r"@media[^{]*max-width:\s*640px[^{]*\{(.*?\n\})", css, re.S)
+          if not m or not re.search(r"\.plate-label[^}]*display:\s*none", m.group(1)):
+              fail.append("labels must be hidden under 640px "
+                          "(@media (max-width: 640px) { .plate-label { display: none } })")
           if "--band" not in src or "--hudscale" not in src:
               fail.append("relayout() must publish --band and --hudscale")
           # The replay viewer is a STATIC bundle, never a pod.
