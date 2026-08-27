@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Trick-Taking — renderer text-bounds fixture</title>
+<link rel="stylesheet" href="./chrome.css">
+</head>
+<body>
+<!--
+  The WORST-CASE text fixture, and the only gate in CI that ever draws the
+  LLM-text chrome.
+
+  tools/ci/docker_smoke.sh runs with no ANTHROPIC_API_KEY, so every seat in
+  the smoke replay plays the scripted baseline and emits no notes at all
+  (cogchemists, 2026-08-24). This page loads the SHIPPED client/renderer.js -
+  not a re-implementation of it - with a synthetic state carrying a full-cap
+  400-rune `notes` on EVERY seat and a full-cap 120-rune `tell`, and cycles
+  the canvas through 360x640, 960x640 and 1440x900. 360 px is the width of
+  the softmax.com featured-match iframe.
+
+  Run it with:
+    node tools/ci/viewer_smoke.mjs --bundle <dir> --replay <any file> \
+      --strict-text-bounds
+  `canvas_text.never_inside` must be 0: the card table is a fixed arena, so
+  a string that never once lands inside the canvas is a string with nowhere
+  to go.
+-->
+<div id="layout">
+  <div id="stage">
+    <div id="topband">
+      <div id="wordmark">TRICK<span>·TAKING</span></div>
+      <div id="clock">HAND 0</div>
+      <div id="topright">
+        <span id="statuschip">fixture</span>
+        <div id="modulechip">SPADES</div>
+        <button id="feedtoggle">LOG »</button>
+      </div>
+    </div>
+    <div id="scorebug"></div>
+    <div id="board-wrap">
+      <canvas id="table" width="360" height="640"></canvas>
+      <div id="lightpool"></div>
+      <div id="grain"></div>
+      <div id="endscreen"></div>
+    </div>
+    <div id="transport">
+      <div class="scrub" id="scrub"></div>
+      <div class="tbar">
+        <button class="tbtn" id="play">❚❚</button>
+        <span class="tpos" id="pos">0 / 0</span>
+      </div>
+    </div>
+  </div>
+  <div id="feed"></div>
+</div>
+<div id="loading" style="display:none"></div>
+<script src="./renderer.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  function runes(text) { return Array.from(text).length; }
+
+  function cap(seed, limit) {
+    var out = "";
+    while (runes(out) < limit) out += seed;
+    return Array.from(out).slice(0, limit - 1).join("") + "\u2026";
+  }
+
+  // Deliberately multi-byte, matching the server's own caps: notes 400
+  // runes, tell 120 runes.
+  var NOTES = cap("\u2660\u2665\u2666\u2663 count: queen out, west void " +
+    "in \u2666 since trick 1, two high hearts left \u2014 ", 400);
+  var TELL = cap("Nil: not one card that can win a trick. Partner, cover " +
+    "\u2014 and read the lead, because it is all I can say. ", 120);
+
+  function fail(message) {
+    document.documentElement.setAttribute("data-replay-error", message);
+    var loading = document.getElementById("loading");
+    if (loading) {
+      loading.style.display = "";
+      loading.textContent = "FIXTURE FAILED: " + message;
+    }
+  }
+
+  // Self-check: the fixture is only evidence if it really is at the cap.
+  if (runes(NOTES) !== 400) { fail("notes is " + runes(NOTES) + " runes, want 400"); return; }
+  if (runes(TELL) !== 120) { fail("tell is " + runes(TELL) + " runes, want 120"); return; }
+
+  var NAMES = ["Sprocket", "Gizmo", "Ratchet", "Widget"];
+  var POLICIES = ["trick-taking-signaller", "trick-taking-counter",
+    "Baseline (1)", "Baseline (2)"];
+  var SEAT_ORDER = [2, 0, 3, 1];   // table position -> slot
+  var POS_OF = [1, 3, 0, 2];       // slot -> table position
+
+  function hand(slot, count) {
+    var cards = [];
+    for (var i = 0; i < count; i++) cards.push((slot * 13 + i) % 52);
+    return cards;
+  }
+
+  function seat(slot, opts) {
+    opts = opts || {};
+    return {
+      slot: slot, pos: POS_OF[slot], name: NAMES[slot], team: POS_OF[slot] % 2,
+      hand: hand(slot, opts.cards === undefined ? 11 : opts.cards),
+      bid: [4, 0, 3, 5][slot], made: opts.made || 0,
+      tricks: opts.made || 0, points: [120, -70, 120, -70][slot],
+      net: [190, -190, 190, -190][slot], score: [0.8, 0.2, 0.8, 0.2][slot],
+      penalty: 0, "void": [false, true, false, false],
+      // A full-cap note on EVERY seat, simultaneously: the layout has to
+      // reserve room for four of them at once, not one at a time.
+      notes: NOTES,
+      acting: opts.acting === slot, sittingOut: false,
+      dealer: slot === 3
+    };
+  }
+
+  function state(trick, table, actor) {
+    return {
+      module: "spades", displayName: "Spades", hand: 2, hands: 4,
+      dealer: 3, seatOrder: SEAT_ORDER, trump: 3, trumpName: "spades",
+      upcard: -1, turnup: -1, kitty: [], "discard": -1, maker: -1,
+      alone: false, broken: true, passDir: "",
+      phase: "play", actor: actor, leader: 0, trick: trick, tricks: 13,
+      table: table,
+      seats: [seat(0, { acting: actor, made: trick }),
+        seat(1, { acting: actor, made: 0 }),
+        seat(2, { acting: actor, made: trick }),
+        seat(3, { acting: actor, made: 1 })],
+      teams: [{ points: 120, bid: 7, tricks: trick * 2 },
+        { points: -70, bid: 5, tricks: 1 }],
+      tell: TELL, handDone: false, gameDone: false, reason: ""
+    };
+  }
+
+  var events = [
+    { kind: "start", text: "spades" },
+    { kind: "hand", hand: 2, dealer: 3, count: 13, hands: [[], [], [], []] },
+    { kind: "bid", hand: 2, slot: 0, action: "bid", value: 4, tell: TELL,
+      text: NOTES, scripted: false },
+    { kind: "bid", hand: 2, slot: 1, action: "bid", value: 0, tell: TELL,
+      text: NOTES, scripted: false },
+    { kind: "bid", hand: 2, slot: 2, action: "bid", value: 3, tell: TELL,
+      text: NOTES, scripted: false },
+    { kind: "bid", hand: 2, slot: 3, action: "bid", value: 5, tell: TELL,
+      text: NOTES, scripted: false },
+    { kind: "play", hand: 2, slot: 0, card: 51, trick: 0, trickPos: 0,
+      legal: [51, 47], tell: TELL, text: NOTES, scripted: false },
+    { kind: "play", hand: 2, slot: 1, card: 43, trick: 0, trickPos: 1,
+      legal: [43], text: NOTES, scripted: false },
+    { kind: "play", hand: 2, slot: 2, card: 39, trick: 0, trickPos: 2,
+      legal: [39], text: NOTES, scripted: false },
+    { kind: "play", hand: 2, slot: 3, card: 35, trick: 0, trickPos: 3,
+      legal: [35], text: NOTES, scripted: false },
+    { kind: "trick", hand: 2, trick: 0, slot: 0, cards: [51, 43, 39, 35],
+      value: 0 },
+    { kind: "handEnd", hand: 2, points: [120, -70, 120, -70],
+      teamPoints: [120, -70], tricks: [7, 0, 4, 2],
+      net: [190, -190, 190, -190], text: "team 0 makes 7, nil made" },
+    { kind: "end", hand: 4, text: "complete" }
+  ];
+
+  var TABLES = [
+    [], [], [], [], [], [],
+    [{ slot: 0, card: 51 }],
+    [{ slot: 0, card: 51 }, { slot: 1, card: 43 }],
+    [{ slot: 0, card: 51 }, { slot: 1, card: 43 }, { slot: 2, card: 39 }],
+    [{ slot: 0, card: 51 }, { slot: 1, card: 43 }, { slot: 2, card: 39 },
+      { slot: 3, card: 35 }],
+    [{ slot: 0, card: 51 }, { slot: 1, card: 43 }, { slot: 2, card: 39 },
+      { slot: 3, card: 35 }],
+    [], []
+  ];
+
+  var states = [];
+  for (var i = 0; i <= events.length; i++) {
+    var table = TABLES[Math.min(i, TABLES.length - 1)] || [];
+    states.push(state(Math.min(i, 12), table, i % 4));
+  }
+
+  var payload = {
+    type: "replay",
+    protocol: "tricks.replay.v1",
+    names: NAMES,
+    policyNames: POLICIES,
+    config: {
+      module: "spades", displayName: "Spades", seats: 4, hands: 4,
+      dealSchedule: [], seatOrder: SEAT_ORDER, partnership: true,
+      swingCaps: [460, 460, 460, 460], norm: 1840, seed: 7, sampled: true,
+      gameVersion: 1
+    },
+    events: events,
+    states: states,
+    results: {
+      names: POLICIES, scores: [0.8, 0.2, 0.8, 0.2],
+      win: [true, false, true, false], net: [190, -190, 190, -190],
+      points: [120, -70, 120, -70], teamPoints: [120, -70],
+      tricks: [7, 0, 4, 2], bids: [4, 0, 3, 5], bidsMade: [1, 1, 0, 0],
+      penalties: [0, 0, 0, 0], moons: [0, 0, 0, 0],
+      marches: [0, 0, 0, 0], euchres: [0, 0, 0, 0],
+      nilsMade: [0, 1, 0, 0], nilsFailed: [0, 0, 0, 0], bags: [1, 1, 0, 0],
+      decisions: [14, 14, 14, 14], fallbacks: [0, 0, 0, 0],
+      forcedMoves: [0, 0, 0, 0], audit: null, module: "spades", seats: 4,
+      seatOrder: SEAT_ORDER, handsPlayed: 4, handsScored: 4, hands: 4,
+      norm: 1840, seed: 7, reason: "complete"
+    }
+  };
+
+  // Three canvas sizes, cycled fast enough that every one of them is drawn
+  // before viewer_smoke reads the text-bounds tally.
+  var SIZES = [[360, 640], [960, 640], [1440, 900]];
+  var sizeIndex = 0;
+  var canvas = document.getElementById("table");
+  function applySize() {
+    var size = SIZES[sizeIndex % SIZES.length];
+    sizeIndex += 1;
+    canvas.width = size[0];
+    canvas.height = size[1];
+    canvas.style.width = size[0] + "px";
+    canvas.style.height = size[1] + "px";
+    document.getElementById("stage").style.maxWidth = size[0] + "px";
+    TrickTakingRenderer.relayout();
+  }
+  applySize();
+  window.setInterval(applySize, 200);
+
+  TrickTakingRenderer.bindFeedToggle(document.getElementById("feedtoggle"));
+  TrickTakingRenderer.attachReplay({
+    canvas: canvas,
+    feed: document.getElementById("feed"),
+    scrub: document.getElementById("scrub"),
+    playButton: document.getElementById("play"),
+    label: document.getElementById("pos"),
+    clock: document.getElementById("clock"),
+    scorebug: document.getElementById("scorebug"),
+    endscreen: document.getElementById("endscreen"),
+    modulechip: document.getElementById("modulechip"),
+    assetBase: "./assets",
+    payload: payload
+  });
+})();
+</script>
+</body>
+</html>

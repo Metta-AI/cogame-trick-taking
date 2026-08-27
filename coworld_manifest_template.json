@@ -1,0 +1,700 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Metta-AI/coworld/main/src/coworld/coworld_manifest_schema.json",
+  "tags": [
+    "cards",
+    "trick-taking",
+    "partnerships",
+    "hidden-information",
+    "llm-driven",
+    "turn-based",
+    "four-player"
+  ],
+  "episode_timeout_minutes": 20,
+  "game": {
+    "name": "trick-taking",
+    "replay_viewer": {
+      "bundle": "static-replay-viewer"
+    },
+    "description": "Trick-Taking: one engine, four rule modules, and no talking allowed. Four LLM-piloted cogs sit at one card table and play Euchre, Spades, Hearts or Oh Hell - the shipped variants - through a single engine that deals, enforces follow-suit, decides who takes the trick and rotates the deal, while a rule module supplies the deck, the bidding, the trump rule and the hand scoring. Partnerships are server-assigned and re-drawn every episode: a seeded permutation maps table positions to policy slots, so a policy has a different partner from episode to episode and can never arrange to be partnered with itself. Nothing crosses the table but cards. THERE IS NO CHAT CHANNEL, no say field, no table talk of any kind: everything a partner knows about your hand it inferred from what you bid and what you led, and that is the whole game. Seats play under anonymous cog aliases and see only their own cards, the public bidding, the tricks so far, the known voids, their own private notes carried between decisions, and the precomputed legal move set; spectators and the replay see everything - all four hands, the kitty, the euchre discard, every hearts pass, every note, the 'what your partner just told you' annotation on each bid and lead, and a soft-play audit for the individual modules. Every module scores to the same unit-free, zero-sum number so one Elo ladder ranks all four variants equally. The game is LLM-driven: the server sends the acting seat's policy prompt plus its view to Claude, so A POLICY IS JUST A PROMPT - build one by reusing the published player runnable and setting PLAYER_PROMPT to your strategy. Two scripted baselines, follow and tracker, are fieldable policies in their own right and play any seat that registers as scripted - and every seat when no LLM credentials are available, so episodes always complete.",
+    "owner": "daveey@gmail.com",
+    "runnable": {
+      "type": "game",
+      "image": "{{TRICK_TAKING_IMAGE}}",
+      "run": [
+        "/bin/trick-taking"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY_URI": "secret://coworld/trick-taking/anthropic_api_key"
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-trick-taking/tree/main"
+    },
+    "config_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens",
+        "players"
+      ],
+      "properties": {
+        "tokens": {
+          "description": "One connection token per player slot, indexed by slot.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "players": {
+          "description": "One player display-name object per seat, indexed by slot.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "num_agents": {
+          "description": "Seat count; injected by the commissioner. Every trick-taking variant seats exactly four cogs.",
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 4
+        },
+        "module": {
+          "description": "Which rule module the episode plays.",
+          "type": "string",
+          "enum": [
+            "euchre",
+            "spades",
+            "hearts",
+            "oh-hell"
+          ],
+          "default": "euchre"
+        },
+        "seed": {
+          "description": "Pins the deal of every hand, the seating permutation that assigns partners, the seat aliases and the baselines' tie-breaks. Omit for a fresh random seed per episode.",
+          "type": "integer"
+        },
+        "hands": {
+          "description": "Hands in the episode (capped at sample time by the 240-model-call decision budget).",
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 24,
+          "default": 8
+        },
+        "dealSchedule": {
+          "description": "oh-hell only: cards dealt per hand. One entry per hand; other modules ignore it.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6
+          }
+        },
+        "episodeTimeoutSeconds": {
+          "description": "Wall clock the game assumes the platform allows an episode when COWORLD_TIMEOUT_SECONDS is not in its environment. The soft guard at 55% finishes the hand in progress on the scripted baseline and scores it; the hard guard at 56% voids it, so results and the replay always land inside 60%.",
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 6000,
+          "default": 1200
+        },
+        "turnDelayMs": {
+          "description": "Spectator pacing delay, slept after each COMPLETED trick.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "default": 250
+        },
+        "sampled": {
+          "description": "True once the decision-budget cap has been applied; set by the game, never by a caller.",
+          "type": "boolean"
+        },
+        "model": {
+          "description": "Claude model that drives every seat.",
+          "type": "string",
+          "default": "claude-sonnet-5"
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 2000,
+          "default": 900
+        },
+        "llmTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 20
+        },
+        "player_connect_timeout_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "default": 180
+        }
+      }
+    },
+    "results_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "names",
+        "scores",
+        "win",
+        "net",
+        "points",
+        "tricks",
+        "reason",
+        "module",
+        "seats",
+        "handsScored",
+        "hands",
+        "norm",
+        "seed"
+      ],
+      "properties": {
+        "names": {
+          "description": "Policy display names, indexed by slot. Seats play under anonymous cog aliases in-game; results attribute by policy name.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "string"
+          }
+        },
+        "scores": {
+          "description": "0.5 + net / (2 * NORM), in [0, 1]. Higher is better; breaking even is exactly 0.5 and the four scores sum to 2.0.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "win": {
+          "description": "True for every slot whose net equals the maximum net; ties mark every tied slot.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "boolean"
+          }
+        },
+        "net": {
+          "description": "Cumulative zero-sum per-slot swing over the scored hands.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        },
+        "points": {
+          "description": "Cumulative module-native points per slot: euchre points, spades team score, hearts penalty, oh-hell bid score.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        },
+        "teamPoints": {
+          "description": "Cumulative points per team in the partnership modules; null in hearts and oh-hell.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number"
+          }
+        },
+        "tricks": {
+          "description": "Tricks taken over the episode, per slot.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "bids": {
+          "description": "Sum of the numeric bids made over the episode, per slot; zero in euchre, which does not bid numbers.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "bidsMade": {
+          "description": "Hands in which the slot made its bid exactly (or a made nil).",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "penalties": {
+          "description": "Hearts: cumulative penalty points, after any moon adjustment.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "moons": {
+          "description": "Hearts: hands in which the slot shot the moon.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "marches": {
+          "description": "Euchre: hands in which the slot's side took all five tricks.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "euchres": {
+          "description": "Euchre: hands in which the slot's side euchred the makers.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "nilsMade": {
+          "description": "Spades: successful nils.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "nilsFailed": {
+          "description": "Spades: failed nils.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "bags": {
+          "description": "Spades: cumulative overtricks credited to the slot's team.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "decisions": {
+          "description": "Decisions the slot was asked for, including forced and scripted ones.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "fallbacks": {
+          "description": "Decisions in which the model reply was unusable twice and the scripted baseline played instead.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "forcedMoves": {
+          "description": "Decisions in which the baseline move was rejected and the lowest legal option was forced.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "audit": {
+          "description": "Soft-play matrices for the individual modules; null for euchre and spades. A diagnostic, never an input to the ranking.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "module": {
+          "description": "Which rule module the episode played.",
+          "type": "string",
+          "enum": [
+            "euchre",
+            "spades",
+            "hearts",
+            "oh-hell"
+          ]
+        },
+        "seats": {
+          "description": "Seat count. Always 4.",
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 4
+        },
+        "seatOrder": {
+          "description": "Table position -> policy slot, the seeded seating permutation that assigned partners.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          }
+        },
+        "handsPlayed": {
+          "description": "Hands dealt, including a hand voided by the hard deadline.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "handsScored": {
+          "description": "Hands that were scored; a voided hand is excluded from both the net and NORM.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "hands": {
+          "description": "The episode's hand count after budget fitting.",
+          "type": "integer",
+          "minimum": 2
+        },
+        "norm": {
+          "description": "NORM, the summed swing cap over the scored hands.",
+          "type": "number",
+          "minimum": 0
+        },
+        "seed": {
+          "description": "The episode seed.",
+          "type": "integer"
+        },
+        "reason": {
+          "description": "How the episode ended: complete (every hand scored), deadline (the wall clock) or budget (the model-call allowance).",
+          "type": "string",
+          "enum": [
+            "complete",
+            "deadline",
+            "budget"
+          ]
+        }
+      }
+    },
+    "protocols": {
+      "player": {
+        "type": "text",
+        "value": "tricks.player.v1 - JSON text frames over the websocket named by COWORLD_PLAYER_WS_URL (already carrying ?slot=N&token=T). A trick-taking policy is a prompt: the player container's only job is to deliver it; the game server makes every decision this seat owns by sending that prompt plus the seat's hand, the public record of the hand, its private notes and the PRECOMPUTED LEGAL SET to Claude. game->player frames: {\"type\":\"welcome\",\"protocol\":\"tricks.player.v1\",\"slot\":N,\"name\":<alias>,\"module\":str,\"displayName\":str,\"hands\":int,\"pos\":int,\"partner\":<alias or null>} on connect; {\"type\":\"state\",...} after every event batch, REDACTED - every other slot's hand and notes are emptied and the kitty, the euchre discard, the tell annotations and the policy names are removed, because the seats have hidden information and decisions are server-side so nothing is lost; {\"type\":\"final\",\"done\":true,\"scores\":[...],\"win\":[...],\"names\":[<aliases>],\"points\":[...],\"net\":[...],\"handsScored\":N,\"reason\":str} at episode end, after which the player should exit 0. player->game frames: {\"type\":\"prompt\",\"prompt\":str,\"scripted\":bool,\"baseline\":\"follow\"|\"tracker\"} - the prompt is capped at 4000 characters and truncated on RUNE boundaries server-side; send it after connect and again after welcome; the latest frame applies to all later decisions; scripted:true plays the named built-in baseline for this seat instead of the LLM. The published trick-taking-player runnable reads PLAYER_PROMPT (or PLAYER_SCRIPTED=follow / PLAYER_SCRIPTED=tracker), so a new policy is `coworld upload-policy` of the same image with --secret-env PLAYER_PROMPT=\"<your strategy>\"."
+      },
+      "global": {
+        "type": "text",
+        "value": "Global spectators connect a websocket to /global and receive the full snapshot as JSON after every event: {\"type\":\"state\",\"game\":\"trick-taking\",\"module\":str,\"displayName\":str,\"hand\":int,\"hands\":int,\"dealer\":slot,\"seatOrder\":[pos->slot],\"trump\":int,\"trumpName\":str,\"upcard\":int,\"turnup\":int,\"kitty\":[int],\"discard\":int,\"maker\":slot,\"alone\":bool,\"broken\":bool,\"passDir\":str,\"phase\":deal|bid|pass|discard|play|done,\"actor\":slot,\"leader\":slot,\"trick\":int,\"tricks\":int,\"table\":[{slot,card}],\"seats\":[{slot,pos,name,team,hand,bid,made,tricks,points,net,score,penalty,void,notes,acting,sittingOut,dealer}],\"teams\":[{points,bid,tricks}]|null,\"tell\":str,\"handDone\":bool,\"gameDone\":bool,\"reason\":str,\"policyNames\":[...],\"events\":[...],\"started\":bool,\"done\":bool,\"connected\":[bool]}. Cards are 0..51 with rank = card div 4 (0 = deuce ... 8 = ten, 9 = J, 10 = Q, 11 = K, 12 = A) and suit = card mod 4 (0 clubs, 1 diamonds, 2 hearts, 3 spades). The events array is append-only and is the replay's whole language: start, hand (carrying EVERY slot's dealt cards, the kitty, the up-card or turn-up and the pass direction), pass, bid, trump, discard, play (carrying the acting seat's legal set), trick, broken, handEnd, handVoid, audit and end. SPECTATORS SEE EVERYTHING - all four hands, the kitty, the euchre discard, every hearts pass, every private note, the 'what your partner just told you' tell on each bid and lead, and the soft-play audit. The browser page at /client/global renders the stage; /client/replay plays a recorded episode; the static replay-viewer bundle renders replays hosted by the platform (index.html?replay=<url>) by re-deriving every frame from the recorded events in the browser with the same Nim engine the server runs."
+      }
+    },
+    "docs": {
+      "readme": {
+        "type": "text",
+        "value": "Trick-Taking is a family of four-seat, hidden-information card games for LLM-piloted cogs: Euchre and Spades in partnerships, Hearts and Oh Hell as individuals, all through one engine and one scoring formula. Partners are server-assigned and re-drawn every episode. There is no chat, no signalling channel and no side band - the only thing a seat can tell its partner is which card it plays and what it bids, so bid and lead as if your partner is reading you, because they are. Every seat sees its own hand, the public bidding, the completed tricks, the known voids, its own private notes and the precomputed legal move set; nothing else. A policy is just a prompt: field one by reusing the published trick-taking-player runnable with PLAYER_PROMPT set to your strategy. Two scripted baselines (PLAYER_SCRIPTED=follow, PLAYER_SCRIPTED=tracker) are fieldable policies and also the no-credentials fallback, so episodes always complete."
+      },
+      "pages": [
+        {
+          "id": "rules.md",
+          "title": "rules.md",
+          "content": {
+            "type": "text",
+            "value": "# Trick-Taking - the shared engine\n\nFour seats, table positions 0, 1, 2, 3 clockwise. In the partnership modules positions 0 and 2 play\nagainst 1 and 3. **Partners are server-assigned and re-drawn every episode**: a seed-derived\npermutation `seatOrder` maps table positions to policy slots, so a policy has a different partner\nfrom episode to episode and can never arrange to be partnered with itself. Every results array and\nevery event is indexed by SLOT; only the renderer converts to table position.\n\n## Cards\n\n`card` is 0..51. `rank = card div 4` (0 = deuce ... 8 = ten, 9 = J, 10 = Q, 11 = K, 12 = A) and\n`suit = card mod 4` (0 clubs, 1 diamonds, 2 hearts, 3 spades). In prompts a card is written rank then\nsuit letter - `2C`, `9D`, `10H`, `JS`, `AS`. **Rank ten is written `10`, never `T`.** Euchre's deck is\nthe 24-card subset `rank >= 7`.\n\n## Every hand runs exactly this sequence\n\n1. **Deal.** `dealer = hand mod 4`. A fresh deck is shuffled from the seed and the hand index, and\n   the module's card count is dealt to each position clockwise starting from the position left of\n   the dealer. Any module extra - Euchre's kitty and up-card, Oh Hell's turn-up - comes off the top\n   of the remainder. The full deal is written to the replay: spectators see every card, seats do not.\n2. **Bidding / trump-making.** The module's bidding phases run one decision at a time. Every bid is\n   public the instant it is made.\n3. **Trick play.** Seats play one card each, clockwise from the leader, skipping any seat sitting out.\n4. **Legality of a follow - one rule, engine-wide.** If the acting seat holds at least one card of\n   the LED suit, its legal set is exactly those cards; otherwise its legal set is its whole remaining\n   hand. Two module overlays sit on top and only two: (a) Euchre's left bower is a trump and is not a\n   card of its printed suit, for leading, for following and for winning; (b) the lead restrictions -\n   spades and hearts may not be led until they are broken, and no heart and not the queen of spades\n   may be played on Hearts' trick 0. The legal set is never empty, it is computed by the same\n   predicate the applier validates with, and it is given to the model verbatim.\n5. **Trick winner.** If any trump was played, the highest trump wins; otherwise the highest card of\n   the led suit. Ranks are 2 < 3 < ... < 10 < J < Q < K < A, except that Euchre's trump suit ranks\n   9 < 10 < Q < K < A < left bower < right bower. The winner leads the next trick.\n6. **Hand scoring.** The module converts the trick record into per-position points and into a\n   zero-sum per-slot `net`.\n7. **Rotate and repeat** until the variant's hands are all scored or an end condition fires.\n\n## What a seat sees, and what it does not\n\nVisible: the module's rules and the current phase's legal options; its own hand; the hand number and\nthe dealer; its own table position and, in a partnership module, its partner's alias; the trump\nstate and whether spades or hearts are broken; every bid made this hand, in order; the current trick;\nevery completed trick of this hand and who took it; which seats are known void in which suits;\nthe standings; its own private notes; and the precomputed legal move set.\n\nHidden: every other seat's cards; the kitty and the euchre discard; every other seat's hearts pass;\nevery other seat's notes; completed hands' card-by-card transcripts (only the running standings\nsurvive a hand boundary - the memory a cog wants must live in its own notes, which is the point);\nthe seed; the seating permutation; the tell annotations; the audit; and every policy's real name.\n\n**There is no chat, no say field, no alerts and no side band.** The only thing a seat can send its\npartner is a bid or a card. This is a permanent exclusion, not a deferral - it is the game.\n\n## Ending\n\nThe episode always writes results and a replay and ends in exactly one of three ways.\n`complete` - every hand was scored. `deadline` - the wall clock: past 55% of the episode timeout\nevery remaining decision of the hand in progress is played by the scripted baseline, the hand\nfinishes and IS scored, and the episode stops; past 56% the hand in progress is abandoned, recorded\nas a `handVoid` event, and excluded from the scoring. `budget` - the 240-model-call allowance is\nspent; same settle path as the soft deadline. A seat that never connects is not an end condition:\nafter the connect timeout the game starts anyway and every unconnected slot plays the baseline.\n"
+          }
+        },
+        {
+          "id": "modules.md",
+          "title": "modules.md",
+          "content": {
+            "type": "text",
+            "value": "# The four rule modules\n\n## euchre - 4 seats, partnerships (0&2 vs 1&3), 8 hands\n\n1. Deck of 24 (9, 10, J, Q, K, A of every suit). Five cards each, dealt 3-2 / 2-3 clockwise from the\n   left of the dealer; the four left over are the kitty and its top card is turned face up.\n2. Bidding round 1, clockwise from the left of the dealer: `pass`, `order` (make the up-card's suit\n   trump) or `alone` (make it trump and play without your partner). The first non-pass ends round 1\n   and that seat is the maker; the dealer then picks up the up-card and discards one card face down,\n   hidden from every seat including its own partner.\n3. Bidding round 2 runs only if all four passed. The up-card is turned down and each seat may pass,\n   or `name`/`alone` any suit except the up-card's. **Stick the dealer is ON**: if the first three\n   pass, the dealer must name a suit. There is never a throw-in and never a re-deal.\n4. The jack of trump is the right bower, the highest trump; the jack of the other suit of the same\n   colour is the left bower, the second-highest trump, and it is a TRUMP, not a card of its printed\n   suit.\n5. The seat left of the dealer leads trick 0. If the maker went alone, the maker's partner sits out\n   the whole hand and is skipped in turn order.\n6. Scoring: makers take 3 or 4 tricks = 1 point; all 5 = 2 (4 if alone, a lone march); makers take 2\n   or fewer (euchred) = 2 points to the defenders. Swing cap 4.\n\n## spades - 4 seats, partnerships (0&2 vs 1&3), 4 hands\n\n1. A full 52-card deck, 13 each. Trump is always spades.\n2. Each seat bids 0..13 clockwise from the left of the dealer, seeing every earlier bid. A bid of 0\n   is nil. The team contract is the sum of the two partners' non-nil bids.\n3. A spade may not be led until spades are broken - a spade has been played by a seat void in the\n   led suit - unless the leader holds nothing but spades.\n4. Scoring per team: non-nil members take at least the contract C -> 10*C plus one point per\n   overtrick (a bag); short of it -> minus 10*C. A nil member scores +100 if it wins no trick and\n   -100 otherwise; a failed nil's tricks count as bags but never towards the contract. There is no\n   bag rollover in v1, which makes |team score| <= 230 provable. Swing cap 460.\n\n## hearts - 4 seats, individual, 4 hands\n\n1. A full 52-card deck, 13 each. No trump.\n2. The pass direction cycles left, right, across, hold. On a passing hand every seat chooses exactly\n   3 cards; nothing is revealed until all four have chosen, and a seat never learns what anyone else\n   passed except by inference.\n3. The holder of the two of clubs leads it to trick 0 - a forced move that costs no model call. On\n   trick 0 no heart and not the queen of spades may be played unless a seat holds nothing else.\n   Hearts may not be led until they are broken.\n4. Penalty: every heart taken costs 1 and the queen of spades costs 13; the hand always carries\n   exactly 26. **Shooting the moon**: a seat that takes all 26 scores 0 and every other seat scores\n   26. Fewer penalty points is better. Swing cap 19.5.\n\n## oh-hell - 4 seats, individual, 11 hands\n\n1. The deal schedule is 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1. Each hand deals that many cards from a\n   fresh 52-card shuffle and turns the next card face up: its suit is trump for the hand, and the\n   turn-up itself is out of play.\n2. Each seat bids 0..cards clockwise from the left of the dealer, seeing every earlier bid.\n   **The hook is ON**: the dealer may not bid the value that would make the four bids sum to exactly\n   the number of tricks, so somebody always misses.\n3. A seat that takes EXACTLY its bid scores 10 plus its bid; any other number scores zero - one over\n   is as bad as three under. Swing cap 0.75 * (10 + cards).\n"
+          }
+        },
+        {
+          "id": "scoring.md",
+          "title": "scoring.md",
+          "content": {
+            "type": "text",
+            "value": "# Scoring, ranking, and what the audit does not claim\n\nEach module defines, per hand `h`, a zero-sum per-slot quantity `net_h[i]` with `sum_i net_h[i] = 0`,\nand a **swing cap** `swingCap(module, h) >= max_i |net_h[i]|` proven for that module's rules. Over\nthe hands actually SCORED (a hand voided by the hard deadline is not scored):\n\n    net[i]    = sum over scored hands of net_h[i]      # zero-sum: sum_i net[i] == 0\n    NORM      = sum over scored hands of swingCap      # > 0 whenever a hand was scored\n    scores[i] = 0.5 + net[i] / (2 * NORM)              # in [0, 1]; no clamp is needed\n    win[i]    = (net[i] == max(net))                   # ties: every tied slot true\n\n**Higher is better.** A seat that breaks even scores exactly 0.5, and the four scores sum to exactly\n2.0 in every module. `|net[i]| <= NORM` by construction, so the score lands in [0, 1] with no\nclamping and no special cases. If no hand was scored, every seat scores 0.5.\n\nPer-module swing caps: euchre 4 (tight, proven by the lone march); spades 460 (proven by\n130 + 100 on each side); hearts 19.5 (tight, proven by the moon); oh-hell 0.75 * (10 + cards).\n\n**What the league ranks by:** the platform's Elo over `scores`, in one league across all four\nvariants, equally weighted, round-robin. The score is unit-free - a share of the same normalised\nswing whatever the module - so a Euchre episode and a Hearts episode move Elo by the same amount,\nand one leaderboard is what makes this a family rather than four unrelated boards. `results` also\ncarries the raw legible numbers (`points`, `teamPoints`, `tricks`, `bidsMade`) for the endcard.\n\nKnown and accepted: Spades' proven swing cap is far above typical play, so Spades scores cluster\nnearer 0.5 than Euchre's do. Elo ranks by ordering, `win` is reported alongside, and the endcard\nshows raw points, so the compression costs legibility nothing. A tighter, tuned normaliser would be\na free parameter with no principled value; a proven bound is not.\n\n## The soft-play audit\n\n`results.audit` is non-null for `hearts` and `oh-hell` and null for `euchre` and `spades` - in a\npartnership game, letting your partner win IS the correct play and there is nothing to audit. It is\na pure function of the recorded event log, computed identically by the server and by the wasm replay\nviewer, from the legal set recorded on every `play` event, so it cannot drift from the engine.\n\nFor each ordered pair of slots (a, b): `chance[a][b]` counts the tricks in which, at the moment a\nplayed, b's card was the current best on the table and a's legal set contained a card that would have\nbeaten it; `yield[a][b]` counts those in which a declined to beat it; `yieldRate` is the ratio.\n`field[a]` is the same rate against everyone. For hearts, `discards[a][b]` counts tricks won by b on\nwhich a was void in the led suit, and `gift[a][b]` sums the penalty points a's thrown card carried\ninto them.\n\n**No flags, no thresholds, no penalties.** The audit reports the matrices, the per-seat field rate,\nand a `power` block (`hands`, `chanceMin`, `chanceMedian`) so a four-hand episode's numbers are read\nas the weak evidence they are. It is a diagnostic and is NEVER an input to the ranking: it never\nflags a pair, never adjusts a score and never disqualifies a seat.\n"
+          }
+        }
+      ]
+    }
+  },
+  "player": [
+    {
+      "id": "trick-taking-player",
+      "name": "Trick-Taking Prompt Player",
+      "type": "player",
+      "description": "The reference trick-taking policy: delivers its PLAYER_PROMPT (or a default trick-taking personality) to the game and spectates until the final frame. Field your own policy by uploading this same image with a different PLAYER_PROMPT.",
+      "image": "{{TRICK_TAKING_IMAGE}}",
+      "run": [
+        "/bin/trick-taking-player"
+      ],
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-trick-taking/tree/main"
+    },
+    {
+      "id": "trick-taking-follow",
+      "name": "Trick-Taking Follow Baseline",
+      "type": "player",
+      "description": "The scripted `follow` baseline as a fieldable policy: registers its seat as rule-based so the game server plays it deterministically, no LLM involved. It bids on hand strength, draws trumps when it has the contract, feeds its partner the cheapest card and takes an opponent's trick as cheaply as it can.",
+      "image": "{{TRICK_TAKING_IMAGE}}",
+      "run": [
+        "/bin/trick-taking-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "follow"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-trick-taking/tree/main"
+    },
+    {
+      "id": "trick-taking-tracker",
+      "name": "Trick-Taking Tracker Baseline",
+      "type": "player",
+      "description": "The scripted `tracker` baseline as a fieldable policy: `follow` plus a void table, certain-winner leads, tighter bidding and spades bag avoidance, all computed from public information.",
+      "image": "{{TRICK_TAKING_IMAGE}}",
+      "run": [
+        "/bin/trick-taking-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "tracker"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-trick-taking/tree/main"
+    }
+  ],
+  "variants": [
+    {
+      "id": "euchre",
+      "name": "Euchre (partnerships)",
+      "description": "Four cogs, 24 cards, partnerships by table position, eight hands. Order it up, name it, or go alone; the bowers are trumps and the left bower is not a card of its printed suit.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          }
+        ],
+        "num_agents": 4,
+        "module": "euchre",
+        "hands": 8,
+        "turnDelayMs": 250,
+        "player_connect_timeout_seconds": 180,
+        "episodeTimeoutSeconds": 1200
+      }
+    },
+    {
+      "id": "spades",
+      "name": "Spades (partnerships, bid your tricks)",
+      "description": "Four cogs, 52 cards, partnerships by table position, four hands. Spades are always trump and may not be led until they are broken; a bid of zero is nil and worth a hundred either way.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          }
+        ],
+        "num_agents": 4,
+        "module": "spades",
+        "hands": 4,
+        "turnDelayMs": 250,
+        "player_connect_timeout_seconds": 180,
+        "episodeTimeoutSeconds": 1200
+      }
+    },
+    {
+      "id": "hearts",
+      "name": "Hearts (avoid the points)",
+      "description": "Four cogs, 52 cards, every cog for itself, four hands - one full cycle of pass directions. No trump, 26 penalty points a hand, and a seat that takes all of them shoots the moon.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          }
+        ],
+        "num_agents": 4,
+        "module": "hearts",
+        "hands": 4,
+        "turnDelayMs": 250,
+        "player_connect_timeout_seconds": 180,
+        "episodeTimeoutSeconds": 1200
+      }
+    },
+    {
+      "id": "oh-hell",
+      "name": "Oh Hell (predict exactly)",
+      "description": "Four cogs, every cog for itself, eleven hands of 1 up to 6 cards and back down. The turn-up sets trump, the hook forbids the dealer the balanced bid, and only an exact prediction scores.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          }
+        ],
+        "num_agents": 4,
+        "module": "oh-hell",
+        "hands": 11,
+        "dealSchedule": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          5,
+          4,
+          3,
+          2,
+          1
+        ],
+        "turnDelayMs": 250,
+        "player_connect_timeout_seconds": 180,
+        "episodeTimeoutSeconds": 1200
+      }
+    }
+  ],
+  "certification": {
+    "game_config": {
+      "players": [
+        {
+          "name": "Sprocket"
+        },
+        {
+          "name": "Gizmo"
+        },
+        {
+          "name": "Ratchet"
+        },
+        {
+          "name": "Widget"
+        }
+      ],
+      "num_agents": 4,
+      "module": "euchre",
+      "seed": 7,
+      "hands": 3,
+      "turnDelayMs": 0,
+      "player_connect_timeout_seconds": 180
+    },
+    "players": [
+      {
+        "player_id": "trick-taking-player"
+      },
+      {
+        "player_id": "trick-taking-player"
+      },
+      {
+        "player_id": "trick-taking-follow"
+      },
+      {
+        "player_id": "trick-taking-tracker"
+      }
+    ]
+  }
+}

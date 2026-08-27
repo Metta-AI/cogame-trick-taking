@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Trick-Taking — Player View</title>
+<link rel="stylesheet" href="/client/chrome.css">
+</head>
+<body>
+<div id="layout">
+  <div id="stage">
+    <div id="topband">
+      <div id="wordmark">TRICK<span>·TAKING</span></div>
+      <div id="clock">A POLICY IS JUST A PROMPT</div>
+      <div id="topright">
+        <span id="statuschip">player</span>
+        <!-- trick-taking additions to the inherited cogame-babel chrome -->
+        <div id="modulechip">PLAYER</div>
+        <button id="feedtoggle">LOG »</button>
+      </div>
+    </div>
+    <div id="scorebug"></div>
+    <div id="board-wrap">
+      <canvas id="table" width="960" height="640"></canvas>
+      <div id="lightpool"></div>
+      <div id="grain"></div>
+      <div id="endscreen"></div>
+    </div>
+    </div>
+  <div id="feed"></div>
+</div>
+<script src="/client/renderer.js"></script>
+<script>
+  var canvas = document.getElementById("table");
+  function fit() {
+    var parent = canvas.parentElement;
+    canvas.width = canvas.clientWidth || (parent && parent.clientWidth) || 960;
+    canvas.height = canvas.clientHeight || (parent && parent.clientHeight) ||
+      640;
+  }
+  window.addEventListener("resize", fit);
+  window.addEventListener("load", fit);
+  fit();
+  TrickTakingRenderer.bindFeedToggle(document.getElementById("feedtoggle"));
+</script>
+<!-- trick-taking additions to the inherited cogame-babel chrome -->
+<script>
+  // This page deliberately opens NO websocket. The certifier probes
+  // GET /client/player?slot=0&token=<t> before the player pods start, and a
+  // page that opened the player socket would occupy the slot the real
+  // player container needs (lantern 0.1.1). The seat's own view is
+  // delivered over the player protocol, not over this page.
+  document.getElementById("feed").innerHTML = [
+    '<div class="feed-round-head">TRICK-TAKING — PLAYER RUNNABLE</div>',
+    '<div class="feed-line feed-hand">A policy is just a prompt. The player',
+    ' container connects to the game over the websocket named by',
+    ' COWORLD_PLAYER_WS_URL and delivers one frame:',
+    ' {"type":"prompt","prompt":str,"scripted":bool,',
+    ' "baseline":"follow"|"tracker"}.</div>',
+    '<div class="feed-line feed-play">Every decision this seat owns is made',
+    ' server-side: the game sends this prompt plus the seat\'s hand, the',
+    ' public record of the hand, its private notes and the precomputed legal',
+    ' set to Claude, and applies the reply.</div>',
+    '<div class="feed-line feed-play">Set PLAYER_PROMPT to field your own',
+    ' strategy, or PLAYER_SCRIPTED=follow / PLAYER_SCRIPTED=tracker to play',
+    ' a built-in baseline with no model calls at all.</div>',
+    '<div class="feed-line feed-tell">The table view is at /client/global;',
+    ' the replay viewer is at /client/replay.</div>'
+  ].join("");
+  TrickTakingRenderer.relayout();
+  window.addEventListener("resize", TrickTakingRenderer.relayout);
+  window.addEventListener("load", TrickTakingRenderer.relayout);
+</script>
+</body>
+</html>

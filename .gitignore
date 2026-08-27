@@ -1,0 +1,10 @@
+bin/
+tmp/
+dist/
+replay-viewer/dist/
+*.replay
+# The committed worst-case viewer fixture is the ONE replay this repo ships:
+# it is the only thing in CI that ever draws the LLM-text chrome.
+!tools/ci/fixtures/*.replay
+# Host-specific nimby package paths; regenerate per machine (see README).
+nim.cfg

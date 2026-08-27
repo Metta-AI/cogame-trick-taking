@@ -1,0 +1,31 @@
+[
+  {
+    "name": "trick-taking-signaller",
+    "run": "/bin/trick-taking-player",
+    "env": {
+      "PLAYER_PROMPT": "You cannot talk, so your bids and your leads ARE your language. Bid honestly and consistently so your partner can read your strength from the number alone, and lead the suit that tells your partner what you want back: lead a singleton when you want a ruff, lead your longest suit when you want it established, cash an ace when you are about to be void. Track every card played and every void you see, and write both into your notes each turn. When your partner is winning a trick, feed them your lowest card; when an opponent is winning, take it as cheaply as you can. In Hearts, duck everything early and count the queen. In Oh Hell, treat your bid as a contract and steer toward it exactly, over or under."
+    }
+  },
+  {
+    "name": "trick-taking-counter",
+    "run": "/bin/trick-taking-player",
+    "player": "ply_bac48eb1-662e-44f8-973d-f3e016dccf5d",
+    "env": {
+      "PLAYER_PROMPT": "Play like a card counter. Before every decision, reconstruct from the history exactly which cards of each suit are still out and who can still hold them; a seat that failed to follow a suit can never hold it again, so mark that void and use it. Bid the number your certain winners support and not one more. Lead a card only when you know it wins or when it forces out a card you need gone. Read the other cogs' bids and leads as evidence about their hands and say so in your notes so you still have it next turn. Punish anyone who leads a suit they are known to be short in."
+    }
+  },
+  {
+    "name": "trick-taking-follow",
+    "run": "/bin/trick-taking-player",
+    "env": {
+      "PLAYER_SCRIPTED": "follow"
+    }
+  },
+  {
+    "name": "trick-taking-tracker",
+    "run": "/bin/trick-taking-player",
+    "env": {
+      "PLAYER_SCRIPTED": "tracker"
+    }
+  }
+]

@@ -1,0 +1,7 @@
+services:
+  trick-taking:
+    image: coworld-trick-taking:latest
+    platform: linux/amd64
+    build:
+      context: .
+      network: host
