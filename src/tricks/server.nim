@@ -199,7 +199,7 @@ proc decisionText(sim: Sim, call: Call, decision: Decision): string =
       (if decision.move.suit >= 0: " " & suitName(decision.move.suit) else: "")
   else: who & " waits"
 
-proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
+proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
   {.gcsafe.}:
     let config = state.config
     let gameStart = epochTime()
@@ -369,6 +369,34 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
     if config.turnDelayMs > 0:
       sleep(config.turnDelayMs)
     finishEpisode(runtimeConfig)
+
+proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
+  ## The game thread's top-level guard.
+  ##
+  ## `runEpisode` has one `try` of its own, around the model move. Two other
+  ## sites can raise `TricksError` in principle -- the deal and the forced
+  ## fallback apply -- and neither is reachable: `beginHand` raises only on a
+  ## wrong phase or a short remainder, both ruled out by `validate`, and
+  ## `baselineDecision` probes its own move and falls back to `lowestLegal`,
+  ## which cannot be empty in a decision phase. That is an argument, not a
+  ## guarantee, and the failure it protects against is silent: a game thread
+  ## that dies writes no `results.json` and no replay, sends no `final`
+  ## frame, and leaves `/healthz` answering until the platform kills the pod.
+  ## An episode that cannot finish still has to settle and write what it has.
+  {.gcsafe.}:
+    try:
+      runEpisode(runtimeConfig)
+    except CatchableError as error:
+      echo "trick-taking: game thread failed (", error.name, "): ", error.msg
+      withLock stateLock:
+        ## `deadline` is the honest reason: the episode stopped without
+        ## completing its hands. The hands already scored keep their scores;
+        ## `results.reason` stays inside the declared enum.
+        state.sim.endEarly("deadline")
+        state.broadcastLocked()
+      ## Idempotent (`state.finished`), so this is a no-op if the failure
+      ## happened inside finishEpisode itself.
+      finishEpisode(runtimeConfig)
 
 var gameThread: Thread[RuntimeConfig]
 
