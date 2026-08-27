@@ -454,6 +454,23 @@ jobs:
             --soak 12 \
             --strict-text-bounds
 
+      # The endcard/transport geometry the design note claims viewer_smoke
+      # asserts -- it does not, and that file is byte-identical to the
+      # coworld-builder template and stays that way. An endcard that covers
+      # the scrubber loads, soaks and screenshots exactly like a working one;
+      # only measuring the two boxes in a browser sees it.
+      - name: The endcard never covers the transport band
+        run: |
+          set -euo pipefail
+          replay=""
+          for candidate in dist/smoke/*.replay dist/smoke/replay.json; do
+            if [ -f "${candidate}" ]; then replay="${candidate}"; break; fi
+          done
+          test -n "${replay}" || { echo "::error::no replay in dist/smoke"; exit 1; }
+          node tools/ci/chrome_geometry_check.mjs \
+            --bundle dist/static-replay-viewer \
+            --replay "${replay}"
+
       # A SECOND invocation against the committed Hearts fixture: a shot
       # moon, a full-cap 400-rune `notes` on every seat, a full-cap 120-rune
       # `tell`, and a non-null audit. The cert fixture is a scripted Euchre
