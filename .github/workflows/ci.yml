@@ -373,6 +373,19 @@ jobs:
           manifest = json.load(open("coworld_manifest_template.json"))
           if manifest["game"]["replay_viewer"]["bundle"] != "static-replay-viewer":
               fail.append("game.replay_viewer.bundle must be static-replay-viewer")
+          # ...and the bundle is the ONLY thing the declaration carries. The
+          # game pod also serves a live /client/replay spectator page while
+          # the episode runs (starter chrome, on the certifier's route
+          # list), and the one thing that must never happen is the platform
+          # being pointed at it: a declared pod path is what makes every
+          # hosted replay 404 once the pod is gone. Exact equality, so a
+          # url/path/pod key cannot be added beside the bundle.
+          if manifest["game"]["replay_viewer"] != {"bundle": "static-replay-viewer"}:
+              fail.append("game.replay_viewer must be exactly "
+                          "{\"bundle\": \"static-replay-viewer\"}, got "
+                          + json.dumps(manifest["game"]["replay_viewer"]))
+          if "replay_viewer" in manifest:
+              fail.append("replay_viewer must be nested under game, not top level")
 
           if fail:
               for line in fail:
