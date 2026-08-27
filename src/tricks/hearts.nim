@@ -64,7 +64,12 @@ proc heartsTrickPoints(sim: Sim, cards: seq[int]): int {.nimcall.} =
 
 proc heartsSwingCap(cfg: GameConfig, hand: int): float {.nimcall.} = 19.5
 
-proc heartsWorstCase(cfg: GameConfig, hand: int): int {.nimcall.} = 56
+proc heartsWorstCase(cfg: GameConfig, hand: int): int {.nimcall.} =
+  ## 52 plays, plus one pass decision per seat -- but only on a passing
+  ## hand. Every fourth hand is "hold": nothing is passed, so no pass
+  ## decision is spent and the hand costs 52. Charging 56 flat over-counts
+  ## a four-hand episode by four decisions.
+  if passDirName(hand) == "hold": 52 else: 56
 
 proc heartsLegal(sim: Sim): seq[Move] {.nimcall.} =
   ## The pass pool: every held card is passable, and exactly three distinct

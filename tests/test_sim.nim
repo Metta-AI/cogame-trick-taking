@@ -727,11 +727,15 @@ suite "budget fit":
     check worstCaseDecisions(fitted) <= EpisodeDecisionBudget
 
   test "every shipped variant fits the budget and the soft guard":
-    const Shipped = [("euchre", 8), ("spades", 4), ("hearts", 4),
-      ("oh-hell", 11)]
-    for (module, hands) in Shipped:
+    ## The counts are the design note's own table (§Decisions 3), so a
+    ## module whose worst case drifts from the arithmetic the note published
+    ## fails here rather than silently eating budget headroom.
+    const Shipped = [("euchre", 8, 232), ("spades", 4, 224),
+      ("hearts", 4, 220), ("oh-hell", 11, 188)]
+    for (module, hands, expected) in Shipped:
       let config = fixture(module, hands)
       let decisions = worstCaseDecisions(config)
+      check decisions == expected
       check decisions <= EpisodeDecisionBudget
       ## 2.6 s budgeted per decision against the 0.55 * 1200 s soft guard.
       check decisions.float * 2.6 <= 660.0
@@ -739,6 +743,16 @@ suite "budget fit":
       var unsampled = config
       unsampled.sampled = false
       check sampleEpisode(unsampled).hands == hands
+
+  test "hearts spends no pass decision on a hold hand":
+    ## Pass directions cycle left, right, across, HOLD. The hold hand
+    ## passes nothing, so it costs 52 plays and no pass decision.
+    let m = moduleFor("hearts")
+    let config = fixture("hearts", 4)
+    for hand in 0 ..< 4:
+      let expected = if passDirName(hand) == "hold": 52 else: 56
+      check m.worstCaseDecisions(config, hand) == expected
+    check passDirName(3) == "hold"
 
 suite "rune truncation":
   test "truncateRunes never splits a multi-byte rune":
