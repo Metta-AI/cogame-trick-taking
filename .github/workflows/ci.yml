@@ -149,6 +149,12 @@ jobs:
           done
           exit "${fail}"
 
+      - name: Train bridge complete matches
+        run: |
+          set -euo pipefail
+          nim c -d:release --path:src -o:/tmp/trick-taking-train-bridge tools/train_bridge.nim
+          python3 tools/test_train_bridge.py /tmp/trick-taking-train-bridge
+
       # Acceptance checklist item 7, second clause: the baselines' bidding
       # thresholds are the output of a grid sweep, not guesses. The harness
       # is a gate as well as a record -- it exits non-zero if any grid point

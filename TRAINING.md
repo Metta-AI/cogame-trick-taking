@@ -1,4 +1,23 @@
-# Metta post-training data
+# Training
+
+The numeric bridge supports all four certified variants with one simulator.
+It exposes the acting seat's hand, public table state, and a fixed catalog of
+286 action slots. Hearts passes enumerate all three-card combinations;
+other phases mask unused slots. The 3,896 numeric features include per-slot
+move descriptors, so an action index has a defined meaning at each decision.
+The bridge never encodes opponents' private hands or spectator replay state.
+
+```sh
+nim c -d:release --path:src -o:/tmp/trick-taking-train-bridge tools/train_bridge.nim
+python3 tools/test_train_bridge.py /tmp/trick-taking-train-bridge
+```
+
+Use this command with Metta RL's `recipes.external.coworld_metta_rl.train`,
+or pass the same command to `recipes.external.coworld.train` for native
+PufferLib. Set `players=4` and a finite `total_timesteps` in either recipe.
+The `tracker` baseline is available through the bridge's `teacher` request.
+
+## Metta post-training data
 
 The native simulator and published `tracker` policy export supervised examples
 for all four certified Trick-Taking variants:
