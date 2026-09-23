@@ -2,7 +2,7 @@
 
 The numeric bridge supports all four certified variants with one simulator.
 It exposes the acting seat's hand, public table state, and a fixed catalog of
-286 legal action slots. Hearts passes enumerate all three-card combinations;
+286 action slots. Hearts passes enumerate all three-card combinations;
 other phases mask unused slots. The 3,896 numeric features include per-slot
 move descriptors, so an action index has a defined meaning at each decision.
 The bridge never encodes opponents' private hands or spectator replay state.
