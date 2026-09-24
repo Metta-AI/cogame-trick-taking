@@ -115,7 +115,7 @@ suite "protocols and docs":
     check ids == @["rules.md", "modules.md", "scoring.md"]
 
 suite "players":
-  test "four declared runnables, each with limits.cpu 1":
+  test "three canonical runnables, each with limits.cpu 1":
     var ids: seq[string]
     for player in manifest["player"]:
       ids.add(player["id"].getStr())
@@ -124,7 +124,7 @@ suite "players":
       check player["image"].getStr() == "{{TRICK_TAKING_IMAGE}}"
       check player["resources"]["limits"]["cpu"].getStr() == "1"
       check player["description"].getStr().len > 40
-    check ids == @["trick-taking-jev", "trick-taking-player", "trick-taking-follow",
+    check ids == @["trick-taking-player", "trick-taking-follow",
       "trick-taking-tracker"]
 
   test "every declared player is seated in the certification fixture":
