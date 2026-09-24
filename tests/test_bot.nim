@@ -125,15 +125,49 @@ suite "degrade, never hang":
   test "decide with no credentials returns the scripted move immediately":
     var config = fixture("euchre", 21)
     let client = newLlmClient(config)
+    client.disabled = true
     var sim = initSim(config)
     sim.beginHand()
     let started = epochTime()
     let decision = client.decide(sim, "some operator prompt",
-      scripted = client.disabled, baseline = "follow")
+      scripted = false, baseline = "follow")
     check epochTime() - started < 2.0
     check decision.scripted
     check moveIsLegal(sim, decision.move)
     check decision.notes.len == 0
+
+  test "Jev maps full distributions to legal decisions":
+    for module in ["euchre", "hearts"]:
+      var sim = initSim(fixture(module, 21))
+      sim.beginHand()
+      let criteria = sim.jevCriteria()
+      check criteria.len == sim.legalMoves().len
+      var probabilities = newJObject()
+      for name, _ in criteria.pairs:
+        probabilities[name] = %0.0
+      if module == "hearts":
+        probabilities["1"] = %0.5
+        probabilities["2"] = %0.3
+        probabilities["3"] = %0.2
+      else:
+        probabilities["2"] = %1.0
+      let payload = %*{"answers": {"decision": {
+        "type": "choice", "choice": "1", "confidence": 0.5,
+        "probabilities": probabilities}},
+        "model": "jev-latest", "usage": {"input_tokens": 1,
+        "output_tokens": 1}}
+      let decision = sim.jevDecision(payload, criteria)
+      check moveIsLegal(sim, decision.move)
+      if module == "hearts":
+        check decision.move.cards.len == 3
+        check decision.move.cards == @[
+          sim.legalMoves()[0].cards[0], sim.legalMoves()[1].cards[0],
+          sim.legalMoves()[2].cards[0]]
+      else:
+        check decision.move.action == sim.legalMoves()[1].action
+      payload["answers"]["decision"]["probabilities"]["invalid"] = %0.0
+      expect TricksError:
+        discard sim.jevDecision(payload, criteria)
 
   test "the 429 backoff and one call's worst case are both bounded":
     ## Every wait on the model path has to be a number the deadline can

@@ -15,7 +15,7 @@
     "replay_viewer": {
       "bundle": "static-replay-viewer"
     },
-    "description": "Trick-Taking: one engine, four rule modules, and no talking allowed. Four LLM-piloted cogs sit at one card table and play Euchre, Spades, Hearts or Oh Hell - the shipped variants - through a single engine that deals, enforces follow-suit, decides who takes the trick and rotates the deal, while a rule module supplies the deck, the bidding, the trump rule and the hand scoring. Partnerships are server-assigned and re-drawn every episode: a seeded permutation maps table positions to policy slots, so a policy has a different partner from episode to episode and can never arrange to be partnered with itself. Nothing crosses the table but cards. THERE IS NO CHAT CHANNEL, no say field, no table talk of any kind: everything a partner knows about your hand it inferred from what you bid and what you led, and that is the whole game. Seats play under anonymous cog aliases and see only their own cards, the public bidding, the tricks so far, the known voids, their own private notes carried between decisions, and the precomputed legal move set; spectators and the replay see everything - all four hands, the kitty, the euchre discard, every hearts pass, every note, the 'what your partner just told you' annotation on each bid and lead, and a soft-play audit for the individual modules. Every module scores to the same unit-free, zero-sum number so one Elo ladder ranks all four variants equally. The game is LLM-driven: the server sends the acting seat's policy prompt plus its view to Claude, so A POLICY IS JUST A PROMPT - build one by reusing the published player runnable and setting PLAYER_PROMPT to your strategy. Two scripted baselines, follow and tracker, are fieldable policies in their own right and play any seat that registers as scripted - and every seat when no LLM credentials are available, so episodes always complete.",
+    "description": "Trick-Taking: one engine, four rule modules, and no talking allowed. Four LLM-piloted cogs sit at one card table and play Euchre, Spades, Hearts or Oh Hell - the shipped variants - through a single engine that deals, enforces follow-suit, decides who takes the trick and rotates the deal, while a rule module supplies the deck, the bidding, the trump rule and the hand scoring. Partnerships are server-assigned and re-drawn every episode: a seeded permutation maps table positions to policy slots, so a policy has a different partner from episode to episode and can never arrange to be partnered with itself. Nothing crosses the table but cards. THERE IS NO CHAT CHANNEL, no say field, no table talk of any kind: everything a partner knows about your hand it inferred from what you bid and what you led, and that is the whole game. Seats play under anonymous cog aliases and see only their own cards, the public bidding, the tricks so far, the known voids, their own private notes carried between decisions, and the precomputed legal move set; spectators and the replay see everything - all four hands, the kitty, the euchre discard, every hearts pass, every note, the 'what your partner just told you' annotation on each bid and lead, and a soft-play audit for the individual modules. Every module scores to the same unit-free, zero-sum number so one Elo ladder ranks all four variants equally. The game runs prompt, Jev choice, and scripted policies: reuse the player runnable with PLAYER_PROMPT, PLAYER_JEV=1, or PLAYER_SCRIPTED=follow/tracker. Two scripted baselines, follow and tracker, are fieldable policies in their own right and play any seat that registers as scripted - and every seat when no LLM credentials are available, so episodes always complete.",
     "owner": "daveey@gmail.com",
     "runnable": {
       "type": "game",
@@ -470,6 +470,20 @@
   },
   "player": [
     {
+      "id": "trick-taking-jev",
+      "name": "Trick-Taking Jev Choice Player",
+      "type": "player",
+      "description": "Ranks legal bids, discards, and plays with Jev SystemOne. In Hearts, passes the three cards with the highest individual pass probabilities.",
+      "image": "{{TRICK_TAKING_IMAGE}}",
+      "run": ["/bin/trick-taking-player"],
+      "env": {"PLAYER_JEV": "1"},
+      "resources": {
+        "requests": {"cpu": "100m", "memory": "64Mi"},
+        "limits": {"cpu": "1"}
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-trick-taking/tree/main"
+    },
+    {
       "id": "trick-taking-player",
       "name": "Trick-Taking Prompt Player",
       "type": "player",
@@ -684,7 +698,7 @@
     },
     "players": [
       {
-        "player_id": "trick-taking-player"
+        "player_id": "trick-taking-jev"
       },
       {
         "player_id": "trick-taking-player"

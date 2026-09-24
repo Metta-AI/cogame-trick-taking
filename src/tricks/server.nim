@@ -43,6 +43,7 @@ type
     sim: Sim
     prompts: seq[string]
     scripted: seq[bool]
+    jev: seq[bool]
     baselines: seq[string]
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
@@ -247,6 +248,7 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var simCopy: Sim
       var seatPrompt: string
       var seatScripted = false
+      var seatJev = false
       var baseline = "follow"
       var settled = false
       var paceTrick = false
@@ -298,6 +300,7 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
               simCopy = state.sim
               seatPrompt = state.prompts[call.slot]
               seatScripted = state.scripted[call.slot] or stopReason.len > 0
+              seatJev = state.jev[call.slot]
               baseline = state.baselines[call.slot]
 
       if settled:
@@ -312,7 +315,8 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## no request is issued, so no spacing is owed and nothing is a
       ## fallback. That is what keeps offline certification and the docker
       ## smoke finishing in a second rather than in ten minutes.
-      var modelPath = not seatScripted and not client.disabled
+      var modelPath = not seatScripted and
+        (if seatJev: client.jevAvailable else: not client.disabled)
       if modelPath:
         ## Decision-start to decision-start spacing floor.
         let spacing = (DecisionSpacingMs + client.extraSpacingMs).float / 1000.0
@@ -337,7 +341,8 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
       ## The slow part (Claude) runs outside the lock on a snapshot; only
       ## this thread mutates the sim, so the snapshot cannot go stale.
-      let decision = client.decide(simCopy, seatPrompt, seatScripted, baseline)
+      let decision = client.decide(simCopy, seatPrompt, seatScripted,
+        baseline, seatJev)
 
       withLock stateLock:
         inc state.sim.decisions[call.slot]
@@ -519,12 +524,14 @@ proc websocketHandler(
           ## browser and still fails a strict UTF-8 parser.
           let prompt = truncateRunes(payload{"prompt"}.getStr(), MaxPromptLen)
           let scripted = payload{"scripted"}.getBool(false)
+          let jev = payload{"jev"}.getBool(false)
           var baseline = payload{"baseline"}.getStr("follow").strip()
           if baseline notin Baselines:
             baseline = "follow"
           withLock stateLock:
             state.prompts[slot] = prompt
             state.scripted[slot] = scripted
+            state.jev[slot] = jev
             state.baselines[slot] = baseline
           echo "trick-taking: slot ", slot, " delivered a prompt (",
             prompt.len, " chars",
@@ -586,6 +593,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.sim = initSim(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[bool](config.players.len)
+  state.jev = newSeq[bool](config.players.len)
   state.baselines = newSeq[string](config.players.len)
   for slot in 0 ..< config.players.len:
     state.baselines[slot] = "follow"

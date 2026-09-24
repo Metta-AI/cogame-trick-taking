@@ -41,7 +41,8 @@ when isMainModule:
   if url.len == 0:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
   var prompt = getEnv("PLAYER_PROMPT")
-  if prompt.len == 0:
+  let jev = getEnv("PLAYER_JEV") == "1"
+  if prompt.len == 0 and not jev:
     prompt = DefaultPrompt
   let scriptedEnv = getEnv("PLAYER_SCRIPTED").strip()
   let scripted = scriptedEnv.len > 0
@@ -54,6 +55,7 @@ when isMainModule:
       "type": "prompt",
       "prompt": prompt,
       "scripted": scripted,
+      "jev": jev,
       "baseline": baseline
     }
 
@@ -61,7 +63,8 @@ when isMainModule:
   let socket = newWebSocket(url)
   socket.send(promptFrame())
   echo "trick-taking player: prompt delivered (", prompt.len, " chars",
-    (if scripted: ", scripted " & baseline else: ""), ")"
+    (if scripted: ", scripted " & baseline else: ""),
+    (if jev: ", Jev choices" else: ""), ")"
 
   ## whisky's receiveMessage RAISES on a close frame or a truncated read,
   ## and mummy's send only queues, so the game's quit(0) can outrun the

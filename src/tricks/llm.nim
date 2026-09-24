@@ -18,7 +18,7 @@
 ## on anything.
 
 import
-  std/[json, os, random, strutils, unicode],
+  std/[json, os, random, strutils, times, unicode],
   bitworld/runtime,
   curly,
   sim
@@ -58,6 +58,9 @@ type
     bedrockModels: seq[string]
     bedrockModel: int
     bedrockToken: string
+    jevEndpoint: string
+    jevKey: string
+    jevModel: string
     model: string
     maxOutputTokens: int
     timeoutSeconds: int
@@ -113,6 +116,24 @@ proc newLlmClient*(config: GameConfig): LlmClient =
     rand: initRand(config.seed xor 0x5EED)
   )
   let bedrockEndpoint = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip()
+  let captureUrl = getEnv("METTA_CAPTURE_URL").strip()
+  let typesafeKey = getEnv("TYPESAFE_API_KEY").strip()
+  if captureUrl.len > 0:
+    result.jevEndpoint = captureUrl.strip(chars = {'/'}, leading = false)
+    result.jevKey = getEnv("METTA_CAPTURE_KEY").strip()
+    if result.jevKey.len == 0:
+      raise newException(TricksError, "METTA_CAPTURE_KEY is required")
+    result.jevModel = getEnv("METTA_CAPTURE_MODEL", "typesafe/jev-1.13")
+  elif bedrockEndpoint.len > 0:
+    result.jevEndpoint = bedrockEndpoint.strip(chars = {'/'}, leading = false)
+    result.jevModel = "typesafe/jev-1.13"
+  elif typesafeKey.len > 0:
+    result.jevEndpoint = getEnv("TYPESAFE_BASE_URL", "https://api.typesafe.ai")
+      .strip(chars = {'/'}, leading = false)
+    result.jevKey = typesafeKey
+    result.jevModel = getEnv("TYPESAFE_DEFAULT_MODEL", "jev-latest")
+  if result.jevEndpoint.len > 0:
+    result.curl = newCurly()
   let bedrockToken = getEnv("AWS_BEARER_TOKEN_BEDROCK").strip()
   if bedrockEndpoint.len > 0 or bedrockToken.len > 0:
     let region = getEnv("AWS_REGION",
@@ -142,6 +163,9 @@ proc noteThrottled*(client: LlmClient) =
   ## MaxExtraSpacingMs.
   client.extraSpacingMs =
     min(client.extraSpacingMs + ThrottleExtraMs, MaxExtraSpacingMs)
+
+proc jevAvailable*(client: LlmClient): bool =
+  client.jevEndpoint.len > 0
 
 proc worstCaseCallSeconds*(client: LlmClient): float =
   ## The longest a single `decide` can take on the model path: one attempt,
@@ -954,6 +978,98 @@ proc parseDecision*(sim: Sim, payload: JsonNode): Decision =
 
 # ---- Transport --------------------------------------------------------------
 
+proc jevCriteria*(sim: Sim): JsonNode =
+  result = newJObject()
+  for index, move in sim.legalMoves():
+    let description =
+      case move.kind
+      of mkPlay: "Play " & cardCode(move.card)
+      of mkDiscard: "Discard " & cardCode(move.card)
+      of mkPass: "Pass " & cardCode(move.cards[0])
+      of mkBid:
+        move.action & (if move.suit >= 0: " " & suitName(move.suit)
+          else: "") & (if move.action == "bid": " " & $move.value else: "")
+      of mkNone: raise newException(TricksError, "no legal decision")
+    result[$(index + 1)] = %description
+
+proc jevDecision*(sim: Sim, payload, criteria: JsonNode): Decision =
+  let answer = payload["answers"]["decision"]
+  let probabilities = answer["probabilities"]
+  let reported = answer["choice"].getStr()
+  let legal = sim.legalMoves()
+  if answer["type"].getStr() != "choice" or
+      not criteria.hasKey(reported) or probabilities.len != legal.len:
+    raise newException(TricksError, "Jev returned the wrong choice set")
+  let confidence = answer["confidence"].getFloat()
+  if confidence < 0 or confidence > 1:
+    raise newException(TricksError, "Jev confidence is outside [0, 1]")
+  var values = newSeq[float](legal.len)
+  var total = 0.0
+  for name, probability in probabilities.pairs:
+    if not criteria.hasKey(name):
+      raise newException(TricksError, "Jev returned an unknown choice")
+    let value = probability.getFloat()
+    if value < 0 or value > 1:
+      raise newException(TricksError, "Jev probability is outside [0, 1]")
+    values[parseInt(name) - 1] = value
+    total += value
+  if abs(total - 1) > legal.len.float * 0.005 + 1e-6:
+    raise newException(TricksError, "Jev probabilities do not sum to one")
+  var picks: seq[int]
+  let count = if sim.phase == phPass: 3 else: 1
+  for _ in 0 ..< count:
+    var best = -1.0
+    var bestIndex = -1
+    for index, value in values:
+      if value > best:
+        best = value
+        bestIndex = index
+    picks.add(bestIndex)
+    values[bestIndex] = -1.0
+  if sim.phase == phPass:
+    var cards: seq[int]
+    for index in picks:
+      cards.add(legal[index].cards[0])
+    result.move = passMove(cards)
+  else:
+    result.move = legal[picks[0]]
+  echo "trick-taking jev: choice ", picks[0] + 1,
+    " reported ", reported, " confidence ", confidence,
+    " model ", payload{"model"}.getStr(),
+    " input_tokens ", payload["usage"]{"input_tokens"}.getInt(),
+    " output_tokens ", payload["usage"]{"output_tokens"}.getInt()
+
+proc completeJev(client: LlmClient, sim: Sim, prompt: string): Decision =
+  let slot = sim.actorSlot
+  let criteria = sim.jevCriteria()
+  var headers: HttpHeaders
+  headers["content-type"] = "application/json"
+  if client.jevKey.len > 0:
+    headers["authorization"] = "Bearer " & client.jevKey
+  else:
+    headers["x-coworld-player-slot"] = $slot
+  let instructions =
+    if sim.phase == phPass:
+      "Rank the cards to pass. The three highest-probability cards will be passed together. Maximize your own final score."
+    else:
+      "Choose the legal action that maximizes your own final score. In Euchre and Spades, coordinate with your partner through bids and cards."
+  let body = %*{
+    "model": client.jevModel,
+    "state": sim.systemPrompt(slot) & "\n\n" & sim.userPrompt(prompt),
+    "questions": {"decision": {
+      "type": "choice", "instructions": instructions,
+      "criteria": criteria
+    }}
+  }
+  let started = epochTime()
+  let response = client.curl.post(client.jevEndpoint & "/v1/systemone",
+    headers, $body, client.timeoutSeconds)
+  echo "trick-taking jev: latency_ms ", ((epochTime() - started) * 1000).int
+  if response.code < 200 or response.code >= 300:
+    raise newException(TricksError, "Jev HTTP " & $response.code & ": " &
+      response.body[0 .. min(response.body.high, 300)])
+  sim.jevDecision(parseJson(response.body), criteria)
+
 proc completeText(client: LlmClient, system, user: string): string =
   var body = %*{
     "max_tokens": client.maxOutputTokens,
@@ -996,6 +1112,9 @@ proc completeText(client: LlmClient, system, user: string): string =
     raise newException(TricksError, "anthropic error " & $response.code &
       ": " & response.body[0 .. min(response.body.high, 300)])
   let payload = parseJson(response.body)
+  echo "trick-taking llm: model ", payload{"model"}.getStr(),
+    " input_tokens ", payload["usage"]{"input_tokens"}.getInt(),
+    " output_tokens ", payload["usage"]{"output_tokens"}.getInt()
   if payload{"stop_reason"}.getStr() == "refusal":
     raise newException(TricksError, "anthropic refusal")
   for contentBlock in payload["content"]:
@@ -1024,12 +1143,14 @@ proc decide*(
   sim: Sim,
   prompt: string,
   scripted: bool,
-  baseline: string
+  baseline: string,
+  jev = false
 ): Decision =
   ## One decision for one seat. Never raises: any failure falls back to the
   ## scripted baseline, and a rejected baseline falls back to the lowest
   ## legal option, so the episode always advances.
-  if scripted or client.disabled:
+  if scripted or (client.disabled and not jev) or
+      (jev and client.jevEndpoint.len == 0):
     return baselineDecision(sim, baseline)
   let slot = sim.actorSlot
   let system = systemPrompt(sim, slot)
@@ -1037,8 +1158,12 @@ proc decide*(
   for attempt in 0 .. 1:
     let user = userPrompt(sim, prompt, retry = attempt > 0)
     try:
-      let payload = extractJsonObject(client.completeText(system, user))
-      var decision = parseDecision(sim, payload)
+      var decision: Decision
+      if jev:
+        decision = client.completeJev(sim, prompt)
+      else:
+        let payload = extractJsonObject(client.completeText(system, user))
+        decision = parseDecision(sim, payload)
       ## Reject an illegal reply here so the retry carries the hint.
       var probe = sim
       probe.applyMove(decision.move, decision.notes, false)
@@ -1048,7 +1173,7 @@ proc decide*(
       lastError = error.msg
       echo "trick-taking llm: slot ", slot, " attempt ", attempt,
         " failed: ", error.msg
-      if client.disabled:
+      if client.disabled and not jev:
         break
       if "429" in error.msg:
         ## No retry on a throttle: take the scripted move immediately.
