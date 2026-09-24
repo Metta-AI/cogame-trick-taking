@@ -52,7 +52,7 @@ def main() -> None:
                             "trace_id": trace_id,
                             "trajectory_id": f"trick-taking-container-{args.seed}",
                             "workload": "trick-taking",
-                            "schema_revision": "tricks.player.v1-jev-choice",
+                            "schema_revision": "tricks.player.v2-legal-actions",
                             "started_at": datetime.now(timezone.utc).isoformat(),
                             "request": payload,
                         }
@@ -64,7 +64,8 @@ def main() -> None:
             finished = False
             try:
                 response = client.post(
-                    "https://api.typesafe.ai/v1/systemone",
+                    os.environ.get("TYPESAFE_BASE_URL", "https://api.typesafe.ai").rstrip("/")
+                    + "/v1/systemone",
                     headers={"Authorization": "Bearer " + key},
                     json=payload,
                 )
@@ -107,9 +108,10 @@ def main() -> None:
     thread.start()
     try:
         manifest = json.loads(args.manifest.read_text())
-        game_env = manifest["game"]["runnable"]["env"]
-        game_env.pop("ANTHROPIC_API_KEY_URI", None)
-        game_env.update(
+        manifest["game"]["runnable"]["env"].pop("ANTHROPIC_API_KEY_URI", None)
+        jev_env = next(player["env"] for player in manifest["player"]
+                       if player["id"] == "trick-taking-jev")
+        jev_env.update(
             {
                 "METTA_CAPTURE_URL": f"http://host.docker.internal:{proxy.server_port}",
                 "METTA_CAPTURE_KEY": capture_key,

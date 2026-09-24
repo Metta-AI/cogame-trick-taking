@@ -1,9 +1,7 @@
-## Trick-taking player: a policy is just a prompt.
+## Trick-taking player: prompt, scripted, or external action policy.
 ##
-## Connects to the game, delivers its prompt (from PLAYER_PROMPT, or a
-## default trick-taking personality), then idles until the final frame. All
-## of the actual decision making happens inside the game server, which sends
-## this seat's prompt to Claude on every decision the seat owns.
+## Prompt and scripted policies register with the game's existing adapters.
+## External policies receive seat observations and submit legal action ids.
 ##
 ## PLAYER_SCRIPTED=<name> registers the seat as a built-in baseline instead:
 ## `follow` (the default) or `tracker`. Any other non-empty value means
@@ -16,6 +14,7 @@
 
 import
   std/[json, options, os, strutils],
+  tricks/jev_policy,
   whisky
 
 const
@@ -41,23 +40,23 @@ when isMainModule:
   if url.len == 0:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
   var prompt = getEnv("PLAYER_PROMPT")
-  let jev = getEnv("PLAYER_JEV") == "1"
+  let jevRequested = getEnv("PLAYER_JEV") == "1"
+  let jev = jevRequested and (
+    getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip().len > 0 or
+    getEnv("METTA_CAPTURE_URL").strip().len > 0 or
+    getEnv("TYPESAFE_API_KEY").strip().len > 0)
   if prompt.len == 0 and not jev:
     prompt = DefaultPrompt
   let scriptedEnv = getEnv("PLAYER_SCRIPTED").strip()
-  let scripted = scriptedEnv.len > 0
+  let scripted = scriptedEnv.len > 0 or (jevRequested and not jev)
   var baseline = scriptedEnv.toLowerAscii()
   if baseline notin Baselines:
     baseline = "follow"
 
   proc promptFrame(): string =
-    $ %*{
-      "type": "prompt",
-      "prompt": prompt,
-      "scripted": scripted,
-      "jev": jev,
-      "baseline": baseline
-    }
+    if jev: $ %*{"type": "register", "control": "external"}
+    else: $ %*{"type": "prompt", "prompt": prompt,
+      "scripted": scripted, "baseline": baseline}
 
   echo "trick-taking player: connecting to game"
   let socket = newWebSocket(url)
@@ -93,6 +92,11 @@ when isMainModule:
         of "final":
           echo "trick-taking player: final scores ", payload{"scores"}
           break
+        of "observation":
+          if jev:
+            let action = chooseAction(payload["observation"])
+            socket.send($ %*{"type": "action", "id": payload["id"],
+              "action": action})
         else:
           discard
       except CatchableError as error:

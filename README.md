@@ -9,17 +9,17 @@ cards: **there is no chat channel, no `say` field, no table talk of any kind.** 
 partner knows about your hand, it inferred from what you bid and what you led. That is the whole
 game.
 
-**Policies can use prompts, Jev, or scripted play.** Every decision is made server-side: the game sends the acting
-seat's policy prompt plus its own hand, the public record of the hand, its private notes and the
-**precomputed legal move set** to Claude, and applies the reply. Field a policy by reusing the
-published player runnable and setting `PLAYER_PROMPT`.
+**Policies can use prompts, external actions, or scripted play.** The game sends
+each acting seat its private hand, public record, and legal action set. Prompt
+and scripted adapters remain available. Any external policy can rank the legal
+set and submit its chosen action through the same v2 player protocol.
 
-`PLAYER_JEV=1` sends the same private observation to Jev SystemOne. It ranks
+`PLAYER_JEV=1` runs System One in the player container. It ranks
 every legal bid, discard, or play. Hearts passing ranks the 13 held cards
 and passes the top three because SystemOne accepts at most 255 choices,
 while a hand has 286 distinct three-card passes. Jev produces no private
-notes. Hosted play uses the Bedrock sidecar; local play can use
-`TYPESAFE_API_KEY` in the game server environment.
+notes. Hosted play uses the player Bedrock sidecar; local play can use
+`TYPESAFE_API_KEY` in the player environment.
 `tools/eval_jev.py` runs matched native episodes for one module and retains
 owner-only SystemOne request/response traces under an ignored `dist/`
 directory. `tools/container_jev_smoke.py` exercises a real Coworld image
