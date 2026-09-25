@@ -115,7 +115,7 @@ suite "protocols and docs":
     check ids == @["rules.md", "modules.md", "scoring.md"]
 
 suite "players":
-  test "three declared runnables, each with limits.cpu 1":
+  test "three canonical runnables, each with limits.cpu 1":
     var ids: seq[string]
     for player in manifest["player"]:
       ids.add(player["id"].getStr())

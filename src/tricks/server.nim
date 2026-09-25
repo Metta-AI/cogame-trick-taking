@@ -3,17 +3,17 @@
 ## Endpoints:
 ##   GET /healthz                    - liveness
 ##   GET /client/global              - spectator page
-##   GET /client/player              - player page (view-only; policies are prompts)
+##   GET /client/player              - player page (view-only)
 ##   GET /client/replay              - replay page (replay mode)
 ##   GET /client/renderer.js         - shared stage renderer
 ##   GET /client/chrome.css          - shared chrome
 ##   GET /client/assets/<name>       - sprites and fonts
-##   WS  /player?slot=N&token=T      - player protocol (prompt delivery)
+##   WS  /player?slot=N&token=T      - player protocol
 ##   WS  /global                     - spectator snapshots
 ##   WS  /replay                     - replay payload (replay mode)
 ##
-## Player protocol (tricks.player.v1), all JSON text frames:
-##   game -> player: {"type":"welcome","protocol":"tricks.player.v1",...}
+## Player protocol (tricks.player.v2), all JSON text frames:
+##   game -> player: {"type":"welcome","protocol":"tricks.player.v2",...}
 ##                   {"type":"state",...} after every event batch, REDACTED:
 ##                   every other slot's cards and notes, the kitty, the
 ##                   euchre discard, the tell and the policy names are gone
@@ -22,6 +22,9 @@
 ##                    "baseline":"follow"|"tracker"}
 ##                   (prompt max 4000 characters, truncated on RUNE
 ##                   boundaries; scripted:true plays the named baseline)
+##                 or {"type":"register","control":"external"}
+##   game -> external player: observation with seat state and legal action ids
+##   external player -> game: action with selected legal action ids
 
 import
   std/[json, locks, os, sets, strutils, tables, times],
@@ -43,6 +46,9 @@ type
     sim: Sim
     prompts: seq[string]
     scripted: seq[bool]
+    external: seq[bool]
+    decisionId: int
+    pendingAction: JsonNode
     baselines: seq[string]
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
@@ -247,6 +253,8 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var simCopy: Sim
       var seatPrompt: string
       var seatScripted = false
+      var seatExternal = false
+      var decisionId = 0
       var baseline = "follow"
       var settled = false
       var paceTrick = false
@@ -298,7 +306,31 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
               simCopy = state.sim
               seatPrompt = state.prompts[call.slot]
               seatScripted = state.scripted[call.slot] or stopReason.len > 0
+              seatExternal = state.external[call.slot] and
+                state.playerSockets.hasKey(call.slot)
               baseline = state.baselines[call.slot]
+              if seatExternal and not seatScripted:
+                inc state.decisionId
+                decisionId = state.decisionId
+                state.pendingAction = nil
+                var observation = state.playerStateJson(call.slot)
+                var legal = newJArray()
+                for index, move in state.sim.legalMoves():
+                  let description =
+                    case move.kind
+                    of mkPlay: "Play " & cardCode(move.card)
+                    of mkDiscard: "Discard " & cardCode(move.card)
+                    of mkPass: "Pass " & cardCode(move.cards[0])
+                    of mkBid:
+                      move.action & (if move.suit >= 0:
+                        " " & suitName(move.suit) else: "") &
+                        (if move.action == "bid": " " & $move.value else: "")
+                    of mkNone: "No action"
+                  legal.add(%*{"id": index + 1, "description": description})
+                observation["legalActions"] = legal
+                state.playerSockets[call.slot].send($ %*{
+                  "type": "observation", "id": decisionId,
+                  "observation": observation})
 
       if settled:
         break
@@ -312,7 +344,8 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## no request is issued, so no spacing is owed and nothing is a
       ## fallback. That is what keeps offline certification and the docker
       ## smoke finishing in a second rather than in ten minutes.
-      var modelPath = not seatScripted and not client.disabled
+      var modelPath = not seatScripted and
+        (seatExternal or not client.disabled)
       if modelPath:
         ## Decision-start to decision-start spacing floor.
         let spacing = (DecisionSpacingMs + client.extraSpacingMs).float / 1000.0
@@ -337,7 +370,44 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
       ## The slow part (Claude) runs outside the lock on a snapshot; only
       ## this thread mutates the sim, so the snapshot cannot go stale.
-      let decision = client.decide(simCopy, seatPrompt, seatScripted, baseline)
+      var decision = client.decide(simCopy, seatPrompt,
+        seatScripted or seatExternal, baseline)
+      if seatExternal and modelPath:
+        let deadline = epochTime() + config.llmTimeoutSeconds.float
+        var action: JsonNode
+        while epochTime() < deadline:
+          withLock stateLock:
+            action = state.pendingAction
+          if not action.isNil:
+            break
+          sleep(20)
+        if not action.isNil and action.kind == JObject and
+            action.hasKey("choices") and action["choices"].kind == JArray:
+          let choices = action["choices"]
+          let legal = simCopy.legalMoves()
+          let needed = if simCopy.phase == phPass: 3 else: 1
+          var valid = choices.len == needed
+          var selected: seq[int]
+          if valid:
+            for choice in choices:
+              if choice.kind != JInt or choice.getInt() < 1 or
+                  choice.getInt() > legal.len or choice.getInt() in selected:
+                valid = false
+                break
+              selected.add(choice.getInt())
+          if valid:
+            decision.move =
+              if simCopy.phase == phPass:
+                block:
+                  var cards: seq[int]
+                  for choice in selected:
+                    cards.add(legal[choice - 1].cards[0])
+                  passMove(cards)
+              else: legal[selected[0] - 1]
+            decision.scripted = false
+            decision.forced = false
+            decision.error = ""
+            decision.notes = action{"notes"}.getStr()
 
       withLock stateLock:
         inc state.sim.decisions[call.slot]
@@ -465,7 +535,7 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
       let partner = state.sim.partnerSlot(slot)
       websocket.send($ %*{
         "type": "welcome",
-        "protocol": "tricks.player.v1",
+        "protocol": "tricks.player.v2",
         "slot": slot,
         "name": state.sim.names[slot],
         "module": state.sim.module,
@@ -514,6 +584,18 @@ proc websocketHandler(
         return
       try:
         let payload = parseJson(message.data)
+        if payload{"type"}.getStr() == "register":
+          if payload["control"].getStr() != "external":
+            raise newException(TricksError, "unknown player control")
+          withLock stateLock:
+            state.external[slot] = true
+          return
+        if payload{"type"}.getStr() == "action":
+          withLock stateLock:
+            if state.external[slot] and payload["id"].getInt() ==
+                state.decisionId and state.pendingAction.isNil:
+              state.pendingAction = payload["action"]
+          return
         if payload{"type"}.getStr() == "prompt":
           ## Rune-safe: a byte slice here is how a replay renders in a
           ## browser and still fails a strict UTF-8 parser.
@@ -525,6 +607,7 @@ proc websocketHandler(
           withLock stateLock:
             state.prompts[slot] = prompt
             state.scripted[slot] = scripted
+            state.external[slot] = false
             state.baselines[slot] = baseline
           echo "trick-taking: slot ", slot, " delivered a prompt (",
             prompt.len, " chars",
@@ -586,6 +669,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.sim = initSim(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[bool](config.players.len)
+  state.external = newSeq[bool](config.players.len)
   state.baselines = newSeq[string](config.players.len)
   for slot in 0 ..< config.players.len:
     state.baselines[slot] = "follow"

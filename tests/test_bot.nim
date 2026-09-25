@@ -125,11 +125,12 @@ suite "degrade, never hang":
   test "decide with no credentials returns the scripted move immediately":
     var config = fixture("euchre", 21)
     let client = newLlmClient(config)
+    client.disabled = true
     var sim = initSim(config)
     sim.beginHand()
     let started = epochTime()
     let decision = client.decide(sim, "some operator prompt",
-      scripted = client.disabled, baseline = "follow")
+      scripted = false, baseline = "follow")
     check epochTime() - started < 2.0
     check decision.scripted
     check moveIsLegal(sim, decision.move)
