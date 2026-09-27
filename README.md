@@ -14,18 +14,6 @@ each acting seat its private hand, public record, and legal action set. Prompt
 and scripted adapters remain available. Any external policy can rank the legal
 set and submit its chosen action through the same v2 player protocol.
 
-`PLAYER_JEV=1` runs System One in the player container. It ranks
-every legal bid, discard, or play. Hearts passing ranks the 13 held cards
-and passes the top three because SystemOne accepts at most 255 choices,
-while a hand has 286 distinct three-card passes. Jev produces no private
-notes. Hosted play uses the player Bedrock sidecar; local play can use
-`TYPESAFE_API_KEY` in the player environment.
-`tools/eval_jev.py` runs matched native episodes for one module and retains
-owner-only SystemOne request/response traces under an ignored `dist/`
-directory. `tools/container_jev_smoke.py` exercises a real Coworld image
-through a local capture proxy. These traces are research data, not approved
-training labels.
-
 ```bash
 coworld upload-policy coworld-trick-taking:latest \
   --name my-trick-taker --run /bin/trick-taking-player \
