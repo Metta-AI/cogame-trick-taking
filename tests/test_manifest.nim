@@ -50,8 +50,8 @@ suite "top level":
     check runnable["type"].getStr() == "game"
     check runnable["image"].getStr() == "{{TRICK_TAKING_IMAGE}}"
     check runnable["run"][0].getStr() == "/bin/trick-taking"
-    check runnable["env"]["ANTHROPIC_API_KEY_URI"].getStr() ==
-      "secret://coworld/" & game["name"].getStr() & "/anthropic_api_key"
+    doAssert runnable{"env"}{"ANTHROPIC_API_KEY_URI"}.isNil,
+      "hosted LLM uses the platform sidecar without provider secrets"
 
 suite "schemas":
   test "every array property in config_schema declares minItems and maxItems":
