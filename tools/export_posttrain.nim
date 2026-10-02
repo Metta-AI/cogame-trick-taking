@@ -40,7 +40,8 @@ when isMainModule:
     config = sampleEpisode(config)
     var sim = initSim(config)
     let episode = "trick-taking-" & variant & "-" & $seed
-    let trajectory = newDecisionTrajectory(episode, episode, "trick-taking",
+    let seedFamily = "trick-taking-" & $seed
+    let trajectory = newDecisionTrajectory(episode, seedFamily, "trick-taking",
       sourceRevision, sourceRevision)
     while not sim.done:
       let call = sim.currentCall()
@@ -80,7 +81,7 @@ when isMainModule:
         if attempt["attempt_id"].getStr() == selected and attempt["policy"].getStr() == "scripted-tracker":
           doAssert attempt["parsed_action"] == event["executed_action"]
           labelIds.add(%*{"decision_index": event["decision_index"], "decision_id": event["decision_id"]})
-          rows.add($(%*{"episode_id": episode, "seed": episode,
+          rows.add($(%*{"episode_id": episode, "seed": seedFamily,
             "decision_id": event["decision_index"],
             "prompt": attempt["prompt"],
             "completion": [{"role": "assistant", "content": attempt["response"]}],
