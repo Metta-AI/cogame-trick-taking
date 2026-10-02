@@ -841,6 +841,11 @@ proc eventToJson*(event: GameEvent): JsonNode =
   if event.text.len > 0: result["text"] = %event.text
   if not event.data.isNil: result["data"] = event.data
 
+proc publicEventJson*(event: GameEvent): JsonNode =
+  var public = event
+  if event.kind in {evBid, evPlay, evDiscard, evPass}: public.text = ""
+  result = public.eventToJson()
+
 proc eventFromJson*(node: JsonNode): GameEvent =
   result = GameEvent(
     kind: parseEnum[EventKind](node["kind"].getStr()),
@@ -991,7 +996,7 @@ proc replayJson*(sim: Sim): JsonNode =
     policyNames.add(%player.name)
   var events = newJArray()
   for event in sim.events:
-    events.add(event.eventToJson())
+    events.add(event.publicEventJson())
   %*{
     "protocol": "tricks.replay.v" & $GameVersion,
     "names": names,

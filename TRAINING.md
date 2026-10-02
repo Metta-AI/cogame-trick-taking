@@ -1,57 +1,64 @@
 # Training
 
-The numeric bridge supports all four certified variants with one simulator.
-It exposes the acting seat's hand, public table state, and a fixed catalog of
-286 action slots. Hearts passes enumerate all three-card combinations;
-other phases mask unused slots. The 3,896 numeric features include per-slot
-move descriptors, so an action index has a defined meaning at each decision.
-The bridge never encodes opponents' private hands or spectator replay state.
+The authoritative game records private native Messages requests, responses,
+all retries, actual served model and platform call identifiers when
+`COGAME_SAVE_TRAJECTORY_URI` is set. Supply `COWORLD_EPISODE_ID`,
+`COWORLD_GAME_VERSION`, and `COWORLD_SOURCE_REVISION`; absent pins fail before play.
+Recording finishes before results trigger player teardown.
 
-```sh
-nim c -d:release --path:src -o:/tmp/trick-taking-train-bridge tools/train_bridge.nim
-python3 tools/test_train_bridge.py /tmp/trick-taking-train-bridge
-```
+Each accepted proposal is compared with the independently recorded engine event.
+The corpus retains every seat, consumed fallback, forced action, and complete
+participant outcome. Missing credentials, external timeouts, deadlines, and
+engine-forced actions are fallback evidence, never teacher labels.
+Public replay and live spectator events exclude private memory. Stored replay
+readers retain their existing format; archived files are not rewritten.
 
-Use this command with Metta RL's `recipes.external.coworld_metta_rl.train`,
-or pass the same command to `recipes.external.coworld.train` for native
-PufferLib. Set `players=4` and a finite `total_timesteps` in either recipe.
-The `tracker` baseline is available through the bridge's `teacher` request.
+Native calls default to explicit `COWORLD_LLM_TEMPERATURE=1`.
+Use `0` for greedy evaluation. Nonfinite or out-of-range settings fail at client
+construction. Checkpoint routes carry actual model, tokenizer, template identity,
+and draw-time tokens/log probabilities when the serving engine provides them.
+Greedy or absent probabilities remain absent and cannot qualify for policy-gradient
+training. A loopback HTTP fixture does not establish Kubernetes deployment parity.
 
-## Metta post-training data
-
-The native simulator and published `tracker` policy export supervised examples
-for all four certified Trick-Taking variants:
+## Language and numeric bridges
 
 ```sh
 nimby sync nimby.lock
+nim c -d:release --path:src -o:/tmp/trick-taking-bridge tools/train_bridge.nim
+python3 tools/test_language_bridge.py /tmp/trick-taking-bridge
+python3 tools/test_train_bridge.py /tmp/trick-taking-bridge
+```
+
+Run the bridge with `coworld_manifest_template.json VARIANT --language` for the
+ordinary hosted prompt, JSON extraction, reply parser, private notes, and action
+execution. The `tracker` teacher uses the same acting-player view.
+The default fixed numeric action catalog is a separate research interface; its
+restricted actions omit free-text memory and do not establish language-policy parity.
+Hidden-hand permutation tests compare the teacher and prompts across every variant.
+
+## Complete private teacher corpus
+
+Commit source before export. Use a fresh destination outside this checkout.
+
+```sh
+nim c -d:release --path:src -o:/tmp/trick-taking-export tools/export_posttrain.nim
 for variant in euchre spades hearts oh-hell; do
-  nim r -d:release --path:src tools/export_posttrain.nim \
-    "/tmp/trick-taking-${variant}" 10 1 "$variant"
+  /tmp/trick-taking-export "/tmp/trick-taking-${variant}" 10 1 "$variant"
 done
 ```
 
-Each run reads the variant configuration from the Coworld manifest, adds the
-per-seat tokens supplied by the hosted platform, and plays complete seeded
-matches without spectator delays. At each decision, it records the acting
-seat's hosted system and user prompts and a `tracker` move accepted by the
-game's reply parser. The parsed move advances the simulation. Whole matches
-stay in one split. The output manifest records source revision, variant,
-scores, hands scored, and row counts. Existing output directories are never
-overwritten.
+`episodes/` contains complete private decision/episode JSONL, with engine-applied
+labels and terminal outcomes. `train.jsonl` and `validation.jsonl` project accepted
+`scripted-tracker` decisions; the manifest names that target policy. Opponent and
+fallback turns remain in the underlying episodes. Seed families stay within a split.
+Files are created under umask 077, episode writes are exclusive, and existing
+outputs are refused. Private corpora are excluded from Docker and Git.
 
-Train an output with Metta post-training:
-
-```sh
-nix develop -c uv run --package metta-posttrain --extra train \
-  python -m metta_posttrain.train --dataset /tmp/trick-taking-euchre \
-  --output /tmp/trick-taking-adapter --model Qwen/Qwen3-0.6B \
-  --max-steps 100 --max-length 4096
-```
-
-Ten complete matches yielded 1,560 training and 394 validation examples for
-Euchre; 1,792 and 448 for Spades; 1,760 and 440 for Hearts; and 1,504 and 376
-for Oh Hell. All 8,274 examples fit the Qwen2.5-0.5B-Instruct tokenizer in
-4,096 tokens; the maximum was 1,414. These examples distill the scripted
-teacher; they do not establish stronger league play. One CPU optimizer step
-per variant with a local tiny model included every example and reduced heldout
-loss in each run, verifying the Metta post-training path.
+Use the current [Metta post-training workflow](https://github.com/Metta-AI/metta/tree/main/packages/metta-posttrain):
+qualify the complete episodes with `coworld training qualify --policy scripted-tracker`,
+then use the SLIME workflow for training, artifact verification, and checkpoint
+reload. Runtime, training, and evaluation must use the same manifest variant,
+operator prompt, model tokenizer/template, and output/context budgets. Serving a
+learner through the sidecar requires a platform-owned authenticated route;
+players cannot choose arbitrary checkpoint URLs. Production rollout remains separate
+from local teacher/native protocol tests.

@@ -807,7 +807,7 @@ suite "the committed hearts_moon fixture":
           " bytes, regenerated is ", generated.len, " bytes"
       check committed == generated
 
-  test "carries a shot moon, full-cap text and a non-null audit":
+  test "carries a shot moon and public tell while excluding private notes":
     let payload = parseJson(heartsMoonReplay())
     check payload["protocol"].getStr() == "tricks.replay.v1"
     check payload["results"]["moons"][0].getInt() == 1
@@ -822,7 +822,7 @@ suite "the committed hearts_moon fixture":
         seatsWithNotes.incl(event{"slot"}.getInt(-1))
       if event{"tell"}.getStr().runeLen == MaxTellLen:
         inc fullTell
-    check fullNotes > 0
-    check seatsWithNotes.len == Seats
+    check fullNotes == 0
+    check seatsWithNotes.len == 0
     check fullTell == 1
     check ($payload).validateUtf8() == -1

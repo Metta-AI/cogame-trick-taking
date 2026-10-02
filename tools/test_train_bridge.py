@@ -25,7 +25,9 @@ def play(binary: Path, variant: str, teacher: bool) -> None:
         return json.loads(process.stdout.readline())
 
     try:
-        observation = request({"kind": "reset", "seed": f"tricks-{variant}-{teacher}", "players": 4})
+        observation = request(
+            {"kind": "reset", "seed": f"tricks-{variant}-{teacher}", "players": 4}
+        )
         widths = set()
         phases = set()
         decisions = 0
@@ -36,7 +38,9 @@ def play(binary: Path, variant: str, teacher: bool) -> None:
             assert len(encoding["actions"]) == 286
             legal = [action for action in encoding["actions"] if action is not None]
             assert legal == observation["action_schema"]["enum"]
-            assert len(legal) == len({json.dumps(action, sort_keys=True) for action in legal})
+            assert len(legal) == len(
+                {json.dumps(action, sort_keys=True) for action in legal}
+            )
             view = observation["semantic_view"]
             assert len(view["seats"]) == 4
             assert len(view["own_cards"]) <= 13
@@ -44,10 +48,18 @@ def play(binary: Path, variant: str, teacher: bool) -> None:
             if view["phase"] == "pass":
                 assert len(legal) == 286
                 assert all(len(action["cards"]) == 3 for action in legal)
-            action = json.loads(request({"kind": "teacher"})["response"]) if teacher else rng.choice(legal)
+            action = (
+                json.loads(request({"kind": "teacher"})["response"])
+                if teacher
+                else rng.choice(legal)
+            )
             assert action in legal
             result = request(
-                {"kind": "step", "decision_id": observation["decision_id"], "response": json.dumps(action)}
+                {
+                    "kind": "step",
+                    "decision_id": observation["decision_id"],
+                    "response": json.dumps(action),
+                }
             )
             assert result["kind"] == "accepted" and result["action"] == action
             observation = result["observation"]
@@ -58,7 +70,14 @@ def play(binary: Path, variant: str, teacher: bool) -> None:
         assert all(0 <= score <= 1 for score in observation["scores"].values())
         assert abs(sum(observation["scores"].values()) - 2) < 1e-9
         assert len(widths) == 1
-        print(variant, "teacher" if teacher else "random", decisions, sorted(phases), widths.pop(), "features")
+        print(
+            variant,
+            "teacher" if teacher else "random",
+            decisions,
+            sorted(phases),
+            widths.pop(),
+            "features",
+        )
     finally:
         process.stdin.close()
         process.stdout.close()

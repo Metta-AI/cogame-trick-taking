@@ -140,7 +140,7 @@ jobs:
               fi
               echo "::group::nim r ${flags} --path:src ${t}"
               # shellcheck disable=SC2086
-              if ! nim r ${flags} --path:src "${t}"; then
+              if ! nim r ${flags} --path:src --out:/tmp/$(basename "${t}" .nim)-${m} "${t}"; then
                 echo "::error::FAILED (${m}) ${t}"
                 fail=1
               fi
@@ -164,7 +164,7 @@ jobs:
       - name: Baseline tuning sweep (grid harness)
         run: |
           set -euo pipefail
-          nim r --hints:off -d:release --path:src tools/ci/tune_baselines.nim \
+          nim r --hints:off -d:release --path:src --out:/tmp/tricks-tune-baselines tools/ci/tune_baselines.nim \
             --matches 96
 
       # The committed worst-case replay the wasm-viewer job plays in a
@@ -176,7 +176,7 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          nim r --hints:off --path:src tools/ci/gen_fixture.nim \
+          nim r --hints:off --path:src --out:/tmp/tricks-gen-fixture tools/ci/gen_fixture.nim \
             dist/fixture/hearts_moon.replay
           ls -l dist/fixture/
 
@@ -189,10 +189,26 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Verify native private decisions and both training modes
+        run: |
+          python3 -m pip install websockets==16.1.1
+          nim c --hints:off -d:release --threads:on --path:src -o:/tmp/trick-taking-game src/trick_taking.nim
+          python3 tools/test_native_trajectory.py /tmp/trick-taking-game /tmp/trick-taking-native-proof "$(git rev-parse HEAD)"
+          nim c --hints:off -d:release --path:src -o:/tmp/trick-taking-bridge tools/train_bridge.nim
+          python3 tools/test_train_bridge.py /tmp/trick-taking-bridge
+          python3 tools/test_language_bridge.py /tmp/trick-taking-bridge
+          nim c --hints:off -d:release --path:src -o:/tmp/trick-taking-export tools/export_posttrain.nim
+          for variant in euchre spades hearts oh-hell; do
+            /tmp/trick-taking-export /tmp/trick-taking-corpus-${variant} 10 1 "${variant}"
+            python3 tools/test_training_corpus.py /tmp/trick-taking-corpus-${variant}
+          done
+
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs
   # end to end in raw docker with the certification fixture's seat mix.
   # ---------------------------------------------------------------------
+
+
   docker-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 45
