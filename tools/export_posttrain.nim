@@ -70,6 +70,7 @@ when isMainModule:
     let destination = output / "episodes" / (episode & ".jsonl")
     trajectory.writeEventsToUri("file://" & absolutePath(destination))
     var rows: seq[string]
+    let labelIds = newJArray()
     for line in events.splitLines():
       if line.len == 0: continue
       let event = parseJson(line)
@@ -78,8 +79,9 @@ when isMainModule:
       for attempt in event["attempts"]:
         if attempt["attempt_id"].getStr() == selected and attempt["policy"].getStr() == "scripted-tracker":
           doAssert attempt["parsed_action"] == event["executed_action"]
+          labelIds.add(%*{"decision_index": event["decision_index"], "decision_id": event["decision_id"]})
           rows.add($(%*{"episode_id": episode, "seed": episode,
-            "decision_id": event["decision_id"], "seat": event["seat"],
+            "decision_id": event["decision_index"],
             "prompt": attempt["prompt"],
             "completion": [{"role": "assistant", "content": attempt["response"]}],
             "game": "trick-taking", "action_schema_revision": "trick-taking-action-v1"}))
@@ -87,7 +89,7 @@ when isMainModule:
     if seed mod 5 == 0: validationRows.add(rows)
     else: trainRows.add(rows)
     runs.add(%*{"episode_id": episode, "seed": seed, "labels": rows.len,
-      "trajectory": "episodes/" & episode & ".jsonl", "outcome": sim.resultsJson()})
+      "trajectory": "episodes/" & episode & ".jsonl", "label_ids": labelIds, "outcome": sim.resultsJson()})
   writeFile(output / "train.jsonl", trainRows.join("\n") & "\n")
   writeFile(output / "validation.jsonl", validationRows.join("\n") & "\n")
   writeFile(output / "manifest.json", pretty(%*{
