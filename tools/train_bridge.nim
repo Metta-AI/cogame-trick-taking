@@ -144,9 +144,11 @@ proc nextDecision(sim: var Sim) =
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len notin 1 .. 2:
+  if args.len notin 1 .. 3:
     quit("usage: trick-taking-train-bridge MANIFEST [variant]", 1)
-  let variant = if args.len == 2: args[1] else: Variants[0]
+  let variant = if args.len >= 2: args[1] else: Variants[0]
+  let language = args.len == 3 and args[2] == "--language"
+  if args.len == 3: doAssert language, "third argument must be --language"
   let manifest = parseFile(args[0])
   var variantConfig: JsonNode
   for entry in manifest["variants"]:
@@ -179,6 +181,11 @@ when isMainModule:
     of "teacher":
       doAssert not game.done
       let teacher = scriptedMove(game, "tracker")
+      if language:
+        let chosen = game.decisionAction(baselineDecision(game, "tracker"))
+        stdout.writeLine($(%*{"response": $chosen}))
+        stdout.flushFile()
+        continue
       var teacherCards = teacher.cards
       teacherCards.sort()
       var chosen: JsonNode
@@ -194,10 +201,12 @@ when isMainModule:
       response = %*{"response": $chosen}
     of "step":
       doAssert not game.done and request["decision_id"].getInt() == id
-      let chosen = parseJson(request["response"].getStr())
-      doAssert chosen in game.actions(), "action is not in the legal catalog"
-      let move = parseDecision(game, chosen).move
-      game.applyMove(move)
+      let chosen = if language: extractJsonObject(request["response"].getStr())
+        else: parseJson(request["response"].getStr())
+      if not language: doAssert chosen in game.actions(), "action is not in the legal catalog"
+      let parsed = parseDecision(game, chosen)
+      let canonical = if language: game.decisionAction(parsed) else: chosen
+      game.applyMove(parsed.move, if language: parsed.notes else: "")
       game.nextDecision()
       inc id
       var observation: JsonNode
@@ -209,7 +218,7 @@ when isMainModule:
         observation = %*{"kind": "terminal", "scores": scores}
       else:
         observation = game.decision(id)
-      response = %*{"kind": "accepted", "action": chosen,
+      response = %*{"kind": "accepted", "action": canonical,
         "observation": observation}
     else:
       raise newException(ValueError, "unknown command: " & request["kind"].getStr())

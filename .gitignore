@@ -8,3 +8,8 @@ replay-viewer/dist/
 !tools/ci/fixtures/*.replay
 # Host-specific nimby package paths; regenerate per machine (see README).
 nim.cfg
+
+# Private training evidence must stay outside game images/public replay.
+training-corpus/
+private-trajectories/
+posttrain-output/

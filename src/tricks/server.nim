@@ -27,12 +27,14 @@
 ##   external player -> game: action with selected legal action ids
 
 import
-  std/[json, locks, os, sets, strutils, tables, times],
+  std/[json, options, locks, os, sets, strutils, tables, times],
   bitworld/runtime,
+  bitworld/decision_trajectory,
   curly,
   mummy,
   mummy/routers,
   llm,
+  training,
   sim
 
 const
@@ -42,6 +44,7 @@ const
 
 type
   GameState = object
+    trajectory: Option[DecisionTrajectory]
     config: GameConfig
     sim: Sim
     prompts: seq[string]
@@ -89,11 +92,12 @@ proc policyNamesJson(gs: GameState): JsonNode =
 proc snapshotJson(gs: GameState): JsonNode =
   var events = newJArray()
   for event in gs.sim.events:
-    events.add(event.eventToJson())
+    events.add(event.publicEventJson())
   var connected = newJArray()
   for slot in 0 ..< gs.config.tokens.len:
     connected.add(%gs.playerSockets.hasKey(slot))
   result = gs.sim.frameStateJson()
+  for player in result["seats"]: player["notes"] = %""
   result["type"] = %"state"
   result["game"] = %"trick-taking"
   result["policyNames"] = gs.policyNamesJson()
@@ -154,6 +158,9 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
       return
     state.finished = true
     results = state.sim.resultsJson()
+    if state.trajectory.isSome:
+      state.trajectory.get().finishTrajectory(state.sim)
+      state.trajectory.get().writeEventsToUri(getEnv(CogameSaveTrajectoryUriEnv))
     replayData = state.replayPayload(results)
 
     ## Players get their final frame BEFORE the artifacts are written: the
@@ -298,7 +305,14 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             let forced = state.sim.forcedMove()
             if forced >= 0:
               ## Exactly one legal option: no model call is spent.
-              state.sim.applyMove(playMove(forced), "", true)
+              let before = state.sim
+              let forcedDecision = Decision(move: playMove(forced), scripted: true,
+                fallback: true, policy: "engine-single-legal")
+              state.sim.applyMove(forcedDecision.move, "", true)
+              if state.trajectory.isSome:
+                state.trajectory.get().recordAppliedDecision(before, state.sim,
+                  call.slot, forcedDecision, state.prompts[call.slot], false,
+                  "engine-single-legal")
               inc state.sim.decisions[call.slot]
               paceTrick = state.sim.trickComplete
               state.broadcastLocked()
@@ -404,11 +418,13 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
                     cards.add(legal[choice - 1].cards[0])
                   passMove(cards)
               else: legal[selected[0] - 1]
+            decision.submittedResponse = $action
             decision.scripted = false
             decision.forced = false
             decision.error = ""
             decision.notes = action{"notes"}.getStr()
 
+      var appliedFallback = ""
       withLock stateLock:
         inc state.sim.decisions[call.slot]
         if decision.scripted and modelPath:
@@ -422,13 +438,18 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           state.sim.applyMove(decision.move, decision.notes,
             decision.scripted or seatScripted)
         except TricksError as error:
-          echo "trick-taking: move rejected (", error.msg,
-            "); using the scripted fallback"
+          echo "trick-taking: move rejected; using the scripted fallback"
           inc state.sim.fallbacks[call.slot]
+          appliedFallback = "engine-rejection"
           let fallback = baselineDecision(state.sim, baseline, error.msg)
           if fallback.forced:
             inc state.sim.forcedMoves[call.slot]
           state.sim.applyMove(fallback.move, "", true)
+        if state.trajectory.isSome:
+          if seatScripted and not state.scripted[call.slot]: appliedFallback = "deadline"
+          if seatExternal and decision.scripted: appliedFallback = "external-timeout"
+          state.trajectory.get().recordAppliedDecision(simCopy, state.sim,
+            call.slot, decision, seatPrompt, state.scripted[call.slot], appliedFallback)
         paceTrick = state.sim.trickComplete
         state.broadcastLocked()
 
@@ -457,7 +478,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
     try:
       runEpisode(runtimeConfig)
     except CatchableError as error:
-      echo "trick-taking: game thread failed (", error.name, "): ", error.msg
+      echo "trick-taking: game thread failed (", error.name, ")"
       withLock stateLock:
         ## `deadline` is the honest reason: the episode stopped without
         ## completing its hands. The hands already scored keep their scores;
@@ -667,6 +688,10 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
     raise newException(TricksError, "tokens and players must align")
   state.config = config
   state.sim = initSim(config)
+  if getEnv(CogameSaveTrajectoryUriEnv).len > 0:
+    state.trajectory = some(newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
+      "trick-taking-" & $config.seed, "trick-taking",
+      getEnv("COWORLD_GAME_VERSION"), getEnv("COWORLD_SOURCE_REVISION")))
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[bool](config.players.len)
   state.external = newSeq[bool](config.players.len)
