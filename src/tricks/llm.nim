@@ -828,21 +828,8 @@ proc optionInstruction(sim: Sim): string =
 
 proc systemPrompt*(sim: Sim, slot: int, selection: PromptSelection): string =
   let m = sim.ruleModule
-  selection.introduction(sim.names[slot], m.displayName) & "\n\n" & m.rulesText() & """
-
-- You never see another cog's cards. Everything you know about them, you
-  inferred from what they bid and what they played.
-- THERE IS NO TALKING AT THIS TABLE. No chat, no signals, no side deals. In
-  the partnership games the ONLY thing you can tell your partner is which
-  card you play and what you bid - so bid and lead as if your partner is
-  reading you, because they are.
-- Your notes are private to you and are handed back to you before every
-  decision. Keep your card count, the voids you have spotted, and your read
-  on each cog in them.
-- Pick exactly one option from the legal list you are given. An illegal
-  answer is replaced by a house baseline move, which is never what you want.
-
-OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no analysis,
+  selection.introduction(sim.names[slot], m.displayName) & "\n\n" & m.rulesText() &
+    selection.tableProtocol() & """OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no analysis,
 no explanation, no markdown fences, no text before or after the object. Your
 reply must begin with the character { and end with }."""
 

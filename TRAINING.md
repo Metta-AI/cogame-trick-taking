@@ -22,9 +22,10 @@ training. A loopback HTTP fixture does not establish Kubernetes deployment parit
 
 ## Prompt diversity
 
-The game-owned trick-taking-rules-v1 bank varies only the introductory
-four-seat table description. All four modules retain their exact rules, private
-observations, no-talking restriction, operator guidance, and output contract.
+The game-owned trick-taking-rules-v2 bank varies the seat introduction and the
+briefing about hidden hands, partner communication, private memory and legal
+actions. Each of the four rule modules keeps its exact card and scoring rules.
+Private observations, operator guidance and the output contract stay fixed.
 Canonical preserves the original system prompt byte for byte. Plain, numbered,
 questions, and reordered are training wordings; heldout-briefing and
 heldout-reference are evaluation only.
@@ -56,7 +57,7 @@ The default fixed numeric action catalog is a separate research interface; its
 restricted actions omit free-text memory and do not establish language-policy parity.
 Hidden-hand permutation tests compare the teacher and prompts across every variant.
 
-## Complete private teacher candidates
+## Complete teacher corpus
 
 Commit source before export. Use a fresh destination outside this checkout.
 
@@ -67,13 +68,14 @@ for variant in euchre spades hearts oh-hell; do
 done
 ```
 
-The episodes directory contains complete private decision/episode JSONL, with
-engine-applied actions and terminal outcomes. The manifest identifies candidate
-decisions from scripted-tracker; it does not admit them to training or create
-train/validation projections. Fallback turns remain in the underlying episodes.
-Every wording and rule module for the same game seed shares one seed family.
+The existing schema-v2 exporter retains complete private episodes and writes
+train.jsonl and validation.jsonl containing accepted scripted-tracker labels.
+Fallback turns remain in the episodes and do not become teacher labels. All
+wordings and rule modules for the same game seed stay in the same split. Each
+manifest run records its selected prompt bank, wording and independent seed.
 
-Append PROMPT_VARIANT [PROMPT_SEED] after the variant to select wording.
+Append PROMPT_VARIANT [PROMPT_SEED] after the variant to select wording. Mixed
+selection advances the prompt seed once per exported episode.
 Held-out wordings are rejected before creating outputs. Files use umask 077,
 episode writes are exclusive, and existing destinations are refused.
 

@@ -186,7 +186,7 @@ for mode in [args.mode] if args.mode else ["accepted", "retry", "fallback", "gre
     systems = {}
     for decision in decisions:
         metadata = decision["observation"]["prompt_template"]
-        assert metadata["bank"] == "trick-taking-rules-v1"
+        assert metadata["bank"] == "trick-taking-rules-v2"
         assert metadata["selection"] == args.wording and metadata["seed"] == args.prompt_seed
         for attempt in decision["attempts"]:
             if attempt["origin"] != "model":

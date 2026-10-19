@@ -17,9 +17,9 @@ when isMainModule:
   var promptConfig = newJObject()
   if args.len >= 5: promptConfig["promptVariant"] = %args[4]
   if args.len >= 6: promptConfig["promptSeed"] = %parseInt(args[5])
-  let selection = promptSelection(promptConfig)
-  doAssert selection.selectedVariant notin {pvHeldoutBriefing, pvHeldoutReference},
-    "held-out wording cannot enter training candidates"
+  let initialSelection = promptSelection(promptConfig)
+  doAssert initialSelection.selectedVariant notin {pvHeldoutBriefing, pvHeldoutReference},
+    "held-out wording cannot enter training sources"
   doAssert matches >= 10 and firstSeed >= 1
   doAssert variant in Variants
   doAssert not dirExists(output) and not fileExists(output)
@@ -32,9 +32,11 @@ when isMainModule:
   for entry in manifest["variants"]:
     if entry["id"].getStr() == variant: variantConfig = entry["game_config"]
   doAssert not variantConfig.isNil
-  var totalLabels = 0
+  var trainRows, validationRows: seq[string]
   var runs = newJArray()
   for seed in firstSeed ..< firstSeed + matches:
+    let selection = PromptSelection(variant: initialSelection.variant,
+      seed: initialSelection.seed + seed - firstSeed)
     var config = defaultGameConfig()
     let runtimeConfig = copy(variantConfig)
     runtimeConfig["tokens"] = newJArray()
@@ -45,7 +47,7 @@ when isMainModule:
     config.update($runtimeConfig)
     config = sampleEpisode(config)
     var sim = initSim(config)
-    let episode = "trick-taking-" & variant & "-" & $seed & "-" & $selection.variant & "-" & $selection.seed
+    let episode = "trick-taking-" & variant & "-" & $seed
     let seedFamily = "trick-taking-" & $seed
     let trajectory = newDecisionTrajectory(episode, seedFamily, "trick-taking",
       sourceRevision, sourceRevision)
@@ -76,6 +78,7 @@ when isMainModule:
     let events = trajectory.eventsJsonl()
     let destination = output / "episodes" / (episode & ".jsonl")
     trajectory.writeEventsToUri("file://" & absolutePath(destination))
+    var rows: seq[string]
     let labelIds = newJArray()
     for line in events.splitLines():
       if line.len == 0: continue
@@ -86,16 +89,23 @@ when isMainModule:
         if attempt["attempt_id"].getStr() == selected and attempt["policy"].getStr() == "scripted-tracker":
           doAssert attempt["parsed_action"] == event["executed_action"]
           labelIds.add(%*{"decision_index": event["decision_index"], "decision_id": event["decision_id"]})
-    doAssert labelIds.len > 0
-    totalLabels += labelIds.len
-    runs.add(%*{"episode_id": episode, "seed": seed, "labels": labelIds.len,
+          rows.add($(%*{"episode_id": episode, "seed": seedFamily,
+            "decision_id": event["decision_index"],
+            "prompt": attempt["prompt"],
+            "completion": [{"role": "assistant", "content": attempt["response"]}],
+            "game": "trick-taking", "action_schema_revision": "trick-taking-action-v1"}))
+    doAssert rows.len > 0
+    if seed mod 5 == 0: validationRows.add(rows)
+    else: trainRows.add(rows)
+    runs.add(%*{"prompt_configuration": selection.selectionMetadata(), "episode_id": episode, "seed": seed, "labels": rows.len,
       "trajectory": "episodes/" & episode & ".jsonl", "label_ids": labelIds, "outcome": sim.resultsJson()})
+  writeFile(output / "train.jsonl", trainRows.join("\n") & "\n")
+  writeFile(output / "validation.jsonl", validationRows.join("\n") & "\n")
   writeFile(output / "manifest.json", pretty(%*{
-    "schema_version": 3, "format": "coworld-private-candidates-v1",
+    "schema_version": 2, "format": "coworld-private-teacher-corpus-v1",
     "game": "trick-taking", "variant": variant, "source_revision": sourceRevision,
-    "prompt_variant": selection.selectionMetadata(),
     "selection": {"policy": "scripted-tracker", "seats": "all"},
-    "operator_prompt": OperatorPrompt, "candidate_examples": totalLabels,
-    "admission": "requires independent review and seed-family split", "runs": runs
+    "operator_prompt": OperatorPrompt, "train_examples": trainRows.len,
+    "validation_examples": validationRows.len, "runs": runs
   }) & "\n")
-  echo "private candidates=", totalLabels
+  echo "train=", trainRows.len, " validation=", validationRows.len
