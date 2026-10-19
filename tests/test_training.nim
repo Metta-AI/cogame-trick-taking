@@ -1,4 +1,5 @@
 ## Teacher and prompt cannot observe opponents' hidden hands.
+import tricks/prompts
 import std/[algorithm, json, sequtils, strutils]
 import bitworld/decision_trajectory
 import tricks/[llm, sim, training]
@@ -40,13 +41,13 @@ when isMainModule:
               inc cursor
           hidden.kitty = reversed(sim.kitty)
           doAssert userPrompt(hidden, "maximize score") == privatePrompt
-          doAssert systemPrompt(hidden, seat) == systemPrompt(sim, seat)
+          doAssert systemPrompt(hidden, seat, PromptSelection()) == systemPrompt(sim, seat, PromptSelection())
           doAssert scriptedMove(hidden, "tracker") == teacher.move
         let before = sim
         let completion = sim.decisionAction(teacher)
         let parsed = parseDecision(sim, extractJsonObject($completion))
         sim.applyMove(parsed.move, parsed.notes, true)
-        trajectory.recordAppliedDecision(before, sim, seat, teacher, "maximize score", true)
+        trajectory.recordAppliedDecision(before, sim, seat, teacher, "maximize score", true, PromptSelection())
         inc labels
       trajectory.finishTrajectory(sim)
       for line in trajectory.eventsJsonl().splitLines():

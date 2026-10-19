@@ -20,12 +20,32 @@ and draw-time tokens/log probabilities when the serving engine provides them.
 Greedy or absent probabilities remain absent and cannot qualify for policy-gradient
 training. A loopback HTTP fixture does not establish Kubernetes deployment parity.
 
+## Prompt diversity
+
+The game-owned trick-taking-rules-v1 bank varies only the introductory
+four-seat table description. All four modules retain their exact rules, private
+observations, no-talking restriction, operator guidance, and output contract.
+Canonical preserves the original system prompt byte for byte. Plain, numbered,
+questions, and reordered are training wordings; heldout-briefing and
+heldout-reference are evaluation only.
+
+Runtime config and bridge reset accept promptVariant and promptSeed.
+Mixed requires an explicit nonnegative prompt seed and selects one of the five
+training wordings by modulo five. Selection stays fixed throughout the episode
+and never consumes the simulation random generator. The default is canonical.
+Bridge reset requires split=validation for held-out wording.
+Private trajectory observations and bridge semantic views carry prompt_template:
+bank, requested selection, resolved variant, seed, and SHA-256 hashes of the base
+system/user prompts. Native attempts retain the exact sent prompt, including
+retry hints.
+
 ## Language and numeric bridges
 
 ```sh
 nimby sync nimby.lock
 nim c -d:release --path:src -o:/tmp/trick-taking-bridge tools/train_bridge.nim
 python3 tools/test_language_bridge.py /tmp/trick-taking-bridge
+python3 tools/test_prompt_games.py /tmp/trick-taking-bridge
 python3 tools/test_train_bridge.py /tmp/trick-taking-bridge
 ```
 
@@ -36,7 +56,7 @@ The default fixed numeric action catalog is a separate research interface; its
 restricted actions omit free-text memory and do not establish language-policy parity.
 Hidden-hand permutation tests compare the teacher and prompts across every variant.
 
-## Complete private teacher corpus
+## Complete private teacher candidates
 
 Commit source before export. Use a fresh destination outside this checkout.
 
@@ -47,17 +67,20 @@ for variant in euchre spades hearts oh-hell; do
 done
 ```
 
-`episodes/` contains complete private decision/episode JSONL, with engine-applied
-labels and terminal outcomes. `train.jsonl` and `validation.jsonl` project accepted
-`scripted-tracker` decisions; the manifest names that target policy. Opponent and
-fallback turns remain in the underlying episodes. Seed families stay within a split.
-Files are created under umask 077, episode writes are exclusive, and existing
-outputs are refused. Private corpora are excluded from Docker and Git.
+The episodes directory contains complete private decision/episode JSONL, with
+engine-applied actions and terminal outcomes. The manifest identifies candidate
+decisions from scripted-tracker; it does not admit them to training or create
+train/validation projections. Fallback turns remain in the underlying episodes.
+Every wording and rule module for the same game seed shares one seed family.
 
-Use the current [Metta post-training workflow](https://github.com/Metta-AI/metta/tree/main/packages/metta-posttrain):
-qualify the complete episodes with `coworld training qualify --policy scripted-tracker`,
-then use the SLIME workflow for training, artifact verification, and checkpoint
-reload. Runtime, training, and evaluation must use the same manifest variant,
+Append PROMPT_VARIANT [PROMPT_SEED] after the variant to select wording.
+Held-out wordings are rejected before creating outputs. Files use umask 077,
+episode writes are exclusive, and existing destinations are refused.
+
+Use the current [Metta post-training workflow](https://github.com/Metta-AI/metta/tree/main/packages/metta-posttraining)
+to import and independently review complete episodes, then split by seed family
+before exporting selected training examples.
+Runtime, training, and evaluation must use the same manifest variant,
 operator prompt, model tokenizer/template, and output/context budgets. Serving a
 learner through the sidecar requires a platform-owned authenticated route;
 players cannot choose arbitrary checkpoint URLs. Production rollout remains separate

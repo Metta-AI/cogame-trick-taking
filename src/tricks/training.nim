@@ -1,11 +1,11 @@
 ## Private authoritative decisions, separate from spectator artifacts.
 import std/[json, options]
 import bitworld/decision_trajectory
-import llm, sim
+import llm, prompts, sim
 
 proc recordAppliedDecision*(trajectory: DecisionTrajectory, before, after: Sim,
     seat: int, proposed: Decision, operatorPrompt: string,
-    deliberateTeacher: bool, fallbackReason = "") =
+    deliberateTeacher: bool, selection: PromptSelection, fallbackReason = "") =
   var applied = newJNull()
   for index in before.events.len ..< after.events.len:
     let event = after.events[index]
@@ -28,7 +28,7 @@ proc recordAppliedDecision*(trajectory: DecisionTrajectory, before, after: Sim,
     var evidence = newDecisionAttempt("event-" & $before.events.len & "-applied",
       if deliberateTeacher: proposed.policy else: "external-trick-taking", origin)
     if deliberateTeacher:
-      evidence.prompt = %*[{"role": "system", "content": systemPrompt(before, seat)},
+      evidence.prompt = %*[{"role": "system", "content": systemPrompt(before, seat, selection)},
         {"role": "user", "content": userPrompt(before, operatorPrompt)}]
       evidence.response = %($before.decisionAction(proposed))
     else:
@@ -44,6 +44,8 @@ proc recordAppliedDecision*(trajectory: DecisionTrajectory, before, after: Sim,
       else:
         selected = some(attempts[index].attemptId)
   var observation = before.frameStateJson()
+  observation["prompt_template"] = selection.promptMetadata(
+    systemPrompt(before, seat, selection), userPrompt(before, operatorPrompt))
   observation.delete("tell")
   observation.delete("kitty")
   observation.delete("discard")

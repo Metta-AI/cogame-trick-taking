@@ -2,7 +2,7 @@
 ## nim c -d:release --path:src -o:trick-taking-train-bridge tools/train_bridge.nim
 
 import std/[algorithm, json, os]
-import tricks/[cards, llm, sim]
+import tricks/[cards, llm, prompts, sim]
 
 const
   OperatorPrompt = "Choose legal moves to maximize your score over the complete match."
@@ -52,7 +52,9 @@ proc actions(sim: Sim): JsonNode =
   while result.len < ActionCount:
     result.add(newJNull())
 
-proc decision(sim: Sim, id: int): JsonNode =
+proc decision(sim: Sim, id: int, selection: PromptSelection): JsonNode =
+  let system = systemPrompt(sim, sim.actorSlot, selection)
+  let user = userPrompt(sim, OperatorPrompt)
   let seat = sim.actorSlot
   var legal = newJArray()
   for move in sim.choices():
@@ -72,7 +74,7 @@ proc decision(sim: Sim, id: int): JsonNode =
   %*{
     "kind": "decision", "game": "trick-taking", "decision_id": id,
     "seat": seat, "engine_seat": seat, "turn": sim.hand,
-    "semantic_view": {"module": sim.module, "hand": sim.hand,
+    "semantic_view": {"prompt_template": selection.promptMetadata(system, user), "module": sim.module, "hand": sim.hand,
       "hands": sim.config.hands, "phase": $sim.phase, "seats": seats,
       "own_cards": hand, "table": table, "trump": sim.trump,
       "upcard": sim.upcard, "turnup": sim.turnup,
@@ -81,8 +83,8 @@ proc decision(sim: Sim, id: int): JsonNode =
       "pass_direction": sim.passDir, "legal_actions": legal},
     "inbox": [],
     "messages": [
-      {"role": "system", "content": systemPrompt(sim, seat)},
-      {"role": "user", "content": userPrompt(sim, OperatorPrompt)}
+      {"role": "system", "content": system},
+      {"role": "user", "content": user}
     ],
     "speech_messages": [],
     "action_schema": {"type": "object", "enum": legal},
@@ -156,6 +158,7 @@ when isMainModule:
       variantConfig = entry["game_config"]
   doAssert not variantConfig.isNil, "unknown variant: " & variant
   var game: Sim
+  var selection: PromptSelection
   var id = 0
   while not stdin.endOfFile:
     let request = parseJson(stdin.readLine())
@@ -163,6 +166,10 @@ when isMainModule:
     case request["kind"].getStr()
     of "reset":
       doAssert request["players"].getInt() == Seats
+      selection = promptSelection(request)
+      if selection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference} and
+          (not request.hasKey("split") or request["split"].getStr() != "validation"):
+        raise newException(ValueError, "held-out wording cannot enter training")
       var config = defaultGameConfig()
       let runtimeConfig = copy(variantConfig)
       runtimeConfig["seed"] = %seedOf(request["seed"].getStr())
@@ -174,7 +181,7 @@ when isMainModule:
       game = initSim(sampleEpisode(config))
       game.nextDecision()
       id = 0
-      response = game.decision(id)
+      response = game.decision(id, selection)
     of "encode":
       doAssert not game.done
       response = game.encoding(id)
@@ -217,7 +224,7 @@ when isMainModule:
           scores[$slot] = %result[slot]
         observation = %*{"kind": "terminal", "scores": scores}
       else:
-        observation = game.decision(id)
+        observation = game.decision(id, selection)
       response = %*{"kind": "accepted", "action": canonical,
         "observation": observation}
     else:

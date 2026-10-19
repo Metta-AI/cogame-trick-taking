@@ -5,6 +5,7 @@ import
   std/[json, sysrand],
   bitworld/runtime,
   tricks/server,
+  tricks/prompts,
   tricks/sim
 
 proc randomSeed(): int =
@@ -43,4 +44,5 @@ when isMainModule:
       " seats=", config.players.len,
       " hands=", config.hands,
       " model=", config.model
-    runGameServer(config, runtimeConfig)
+    runGameServer(config, runtimeConfig, promptSelection(
+      if runtimeConfig.config.len > 0: parseJson(runtimeConfig.config) else: newJObject()))

@@ -197,6 +197,7 @@ jobs:
           nim c --hints:off -d:release --path:src -o:/tmp/trick-taking-bridge tools/train_bridge.nim
           python3 tools/test_train_bridge.py /tmp/trick-taking-bridge
           python3 tools/test_language_bridge.py /tmp/trick-taking-bridge
+          python3 tools/test_prompt_games.py /tmp/trick-taking-bridge
           nim c --hints:off -d:release --path:src -o:/tmp/trick-taking-export tools/export_posttrain.nim
           for variant in euchre spades hearts oh-hell; do
             /tmp/trick-taking-export /tmp/trick-taking-corpus-${variant} 10 1 "${variant}"

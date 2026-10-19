@@ -3,6 +3,7 @@
 ## AND fieldable policies. Every move they propose must be legal in every
 ## module, always.
 
+import tricks/prompts
 import std/[json, random, sets, strutils, times, unicode, unittest]
 import tricks/[llm, sim]
 
@@ -130,7 +131,7 @@ suite "degrade, never hang":
     sim.beginHand()
     let started = epochTime()
     let decision = client.decide(sim, "some operator prompt",
-      scripted = false, baseline = "follow")
+      scripted = false, baseline = "follow", selection = PromptSelection())
     check epochTime() - started < 2.0
     check decision.scripted
     check moveIsLegal(sim, decision.move)
@@ -250,7 +251,7 @@ suite "the tell is spectator-side only":
         of ckNone: break
         else:
           ## Every seat's whole view, exactly as the model would see it.
-          prompts.add(systemPrompt(sim, sim.actorSlot))
+          prompts.add(systemPrompt(sim, sim.actorSlot, PromptSelection()))
           prompts.add(userPrompt(sim, "operator guidance goes here"))
           prompts.add(userPrompt(sim, "operator guidance goes here",
             retry = true))
