@@ -23,6 +23,7 @@ import
   bitworld/runtime,
   bitworld/decision_trajectory,
   curly,
+  prompts,
   sim
 
 const
@@ -825,24 +826,10 @@ proc optionInstruction(sim: Sim): string =
   else:
     ""
 
-proc systemPrompt*(sim: Sim, slot: int): string =
+proc systemPrompt*(sim: Sim, slot: int, selection: PromptSelection): string =
   let m = sim.ruleModule
-  "You are " & sim.names[slot] & ", a cog at a four-seat card table " &
-    "playing " & m.displayName & ".\n\n" & m.rulesText() & """
-
-- You never see another cog's cards. Everything you know about them, you
-  inferred from what they bid and what they played.
-- THERE IS NO TALKING AT THIS TABLE. No chat, no signals, no side deals. In
-  the partnership games the ONLY thing you can tell your partner is which
-  card you play and what you bid - so bid and lead as if your partner is
-  reading you, because they are.
-- Your notes are private to you and are handed back to you before every
-  decision. Keep your card count, the voids you have spotted, and your read
-  on each cog in them.
-- Pick exactly one option from the legal list you are given. An illegal
-  answer is replaced by a house baseline move, which is never what you want.
-
-OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no analysis,
+  selection.introduction(sim.names[slot], m.displayName) & "\n\n" & m.rulesText() &
+    selection.tableProtocol() & """OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no analysis,
 no explanation, no markdown fences, no text before or after the object. Your
 reply must begin with the character { and end with }."""
 
@@ -1101,7 +1088,8 @@ proc decide*(
   sim: Sim,
   prompt: string,
   scripted: bool,
-  baseline: string
+  baseline: string,
+  selection: PromptSelection
 ): Decision =
   ## One decision for one seat. Never raises: any failure falls back to the
   ## scripted baseline, and a rejected baseline falls back to the lowest
@@ -1111,7 +1099,7 @@ proc decide*(
     result.fallback = not scripted
     return
   let slot = sim.actorSlot
-  let system = systemPrompt(sim, slot)
+  let system = systemPrompt(sim, slot, selection)
   var lastError = ""
   for attempt in 0 .. 1:
     let user = userPrompt(sim, prompt, retry = attempt > 0)

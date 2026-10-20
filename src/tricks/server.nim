@@ -34,6 +34,7 @@ import
   mummy,
   mummy/routers,
   llm,
+  prompts,
   training,
   sim
 
@@ -44,6 +45,7 @@ const
 
 type
   GameState = object
+    selection: PromptSelection
     trajectory: Option[DecisionTrajectory]
     config: GameConfig
     sim: Sim
@@ -311,7 +313,7 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
               state.sim.applyMove(forcedDecision.move, "", true)
               if state.trajectory.isSome:
                 state.trajectory.get().recordAppliedDecision(before, state.sim,
-                  call.slot, forcedDecision, state.prompts[call.slot], false,
+                  call.slot, forcedDecision, state.prompts[call.slot], false, state.selection,
                   "engine-single-legal")
               inc state.sim.decisions[call.slot]
               paceTrick = state.sim.trickComplete
@@ -385,7 +387,7 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## The slow part (Claude) runs outside the lock on a snapshot; only
       ## this thread mutates the sim, so the snapshot cannot go stale.
       var decision = client.decide(simCopy, seatPrompt,
-        seatScripted or seatExternal, baseline)
+        seatScripted or seatExternal, baseline, state.selection)
       if seatExternal and modelPath:
         let deadline = epochTime() + config.llmTimeoutSeconds.float
         var action: JsonNode
@@ -449,7 +451,7 @@ proc runEpisode(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           if seatScripted and not state.scripted[call.slot]: appliedFallback = "deadline"
           if seatExternal and decision.scripted: appliedFallback = "external-timeout"
           state.trajectory.get().recordAppliedDecision(simCopy, state.sim,
-            call.slot, decision, seatPrompt, state.scripted[call.slot], appliedFallback)
+            call.slot, decision, seatPrompt, state.scripted[call.slot], state.selection, appliedFallback)
         paceTrick = state.sim.trickComplete
         state.broadcastLocked()
 
@@ -683,7 +685,8 @@ proc runReplayServer*(runtimeConfig: RuntimeConfig) =
     runtimeConfig.port
   gameServer.serve(Port(runtimeConfig.port), runtimeConfig.host)
 
-proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
+proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig, selection: PromptSelection) =
+  state.selection = selection
   if config.tokens.len != config.players.len:
     raise newException(TricksError, "tokens and players must align")
   state.config = config

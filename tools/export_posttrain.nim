@@ -1,19 +1,25 @@
 ## Complete private language teacher episodes with authoritative outcomes.
 import std/[json, os, osproc, strutils, posix]
 import bitworld/decision_trajectory
-import tricks/[llm, sim, training]
+import tricks/[llm, prompts, sim, training]
 
 const OperatorPrompt = "Choose legal actions to maximize your score using only your own hand and public history."
 const Variants = ["euchre", "spades", "hearts", "oh-hell"]
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len notin 2 .. 4:
-    quit("usage: export_posttrain OUTPUT MATCHES [FIRST_SEED] [VARIANT]", 1)
+  if args.len notin 2 .. 6:
+    quit("usage: export_posttrain OUTPUT MATCHES [FIRST_SEED] [VARIANT] [PROMPT_VARIANT] [PROMPT_SEED]", 1)
   let output = args[0]
   let matches = parseInt(args[1])
   let firstSeed = if args.len >= 3: parseInt(args[2]) else: 1
-  let variant = if args.len == 4: args[3] else: Variants[0]
+  let variant = if args.len >= 4: args[3] else: Variants[0]
+  var promptConfig = newJObject()
+  if args.len >= 5: promptConfig["promptVariant"] = %args[4]
+  if args.len >= 6: promptConfig["promptSeed"] = %parseInt(args[5])
+  let initialSelection = promptSelection(promptConfig)
+  doAssert initialSelection.selectedVariant notin {pvHeldoutBriefing, pvHeldoutReference},
+    "held-out wording cannot enter training sources"
   doAssert matches >= 10 and firstSeed >= 1
   doAssert variant in Variants
   doAssert not dirExists(output) and not fileExists(output)
@@ -28,7 +34,13 @@ when isMainModule:
   doAssert not variantConfig.isNil
   var trainRows, validationRows: seq[string]
   var runs = newJArray()
+  var wordingCounts: array[2, int]
   for seed in firstSeed ..< firstSeed + matches:
+    var selection = initialSelection
+    let splitIndex = ord(seed mod 5 == 0)
+    if selection.variant == pvMixed:
+      selection.seed += wordingCounts[splitIndex]
+      inc wordingCounts[splitIndex]
     var config = defaultGameConfig()
     let runtimeConfig = copy(variantConfig)
     runtimeConfig["tokens"] = newJArray()
@@ -39,7 +51,8 @@ when isMainModule:
     config.update($runtimeConfig)
     config = sampleEpisode(config)
     var sim = initSim(config)
-    let episode = "trick-taking-" & variant & "-" & $seed
+    let episode = "trick-taking-" & variant & "-" & $seed & "-" &
+      $selection.variant & "-" & $selection.selectedVariant & "-" & $selection.seed
     let seedFamily = "trick-taking-" & $seed
     let trajectory = newDecisionTrajectory(episode, seedFamily, "trick-taking",
       sourceRevision, sourceRevision)
@@ -57,14 +70,14 @@ when isMainModule:
           fallback: true, policy: "engine-single-legal")
         sim.applyMove(action.move, "", true)
         trajectory.recordAppliedDecision(before, sim, seat, action, OperatorPrompt,
-          false, "engine-single-legal")
+          false, selection, "engine-single-legal")
         continue
       let teacher = baselineDecision(sim, "tracker")
       let completion = sim.decisionAction(teacher)
       let parsed = parseDecision(sim, extractJsonObject($completion))
       doAssert parsed.move == teacher.move
       sim.applyMove(parsed.move, parsed.notes, true)
-      trajectory.recordAppliedDecision(before, sim, seat, teacher, OperatorPrompt, true)
+      trajectory.recordAppliedDecision(before, sim, seat, teacher, OperatorPrompt, true, selection)
     doAssert sim.done and sim.reason == "complete"
     trajectory.finishTrajectory(sim)
     let events = trajectory.eventsJsonl()
@@ -89,7 +102,7 @@ when isMainModule:
     doAssert rows.len > 0
     if seed mod 5 == 0: validationRows.add(rows)
     else: trainRows.add(rows)
-    runs.add(%*{"episode_id": episode, "seed": seed, "labels": rows.len,
+    runs.add(%*{"prompt_configuration": selection.selectionMetadata(), "episode_id": episode, "seed": seed, "labels": rows.len,
       "trajectory": "episodes/" & episode & ".jsonl", "label_ids": labelIds, "outcome": sim.resultsJson()})
   writeFile(output / "train.jsonl", trainRows.join("\n") & "\n")
   writeFile(output / "validation.jsonl", validationRows.join("\n") & "\n")
