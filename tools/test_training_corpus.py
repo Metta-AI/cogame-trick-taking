@@ -25,6 +25,15 @@ for split in ["train", "validation"]:
         assert key not in labels
         labels[key] = row
 assert not split_episodes[0] & split_episodes[1]
+if manifest["runs"][0]["prompt_configuration"]["selection"] == "mixed":
+    training_wordings = {
+        run["prompt_configuration"]["variant"]
+        for run in manifest["runs"]
+        if run["episode_id"] in split_episodes[0]
+    }
+    assert training_wordings == {"canonical", "plain", "numbered", "questions", "reordered"}, (
+        "mixed training split must cover all five wordings"
+    )
 for run in manifest["runs"]:
     events = [
         json.loads(line) for line in (root / run["trajectory"]).read_text().splitlines()
