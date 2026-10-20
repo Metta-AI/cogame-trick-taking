@@ -52,7 +52,7 @@ when isMainModule:
     config = sampleEpisode(config)
     var sim = initSim(config)
     let episode = "trick-taking-" & variant & "-" & $seed & "-" &
-      $selection.selectedVariant & "-" & $selection.seed
+      $selection.variant & "-" & $selection.selectedVariant & "-" & $selection.seed
     let seedFamily = "trick-taking-" & $seed
     let trajectory = newDecisionTrajectory(episode, seedFamily, "trick-taking",
       sourceRevision, sourceRevision)

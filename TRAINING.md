@@ -90,3 +90,7 @@ operator prompt, model tokenizer/template, and output/context budgets. Serving a
 learner through the sidecar requires a platform-owned authenticated route;
 players cannot choose arbitrary checkpoint URLs. Production rollout remains separate
 from local teacher/native protocol tests.
+
+Episode IDs and trajectory filenames include requested selection, resolved wording,
+and prompt seed, distinguishing explicit and mixed collections with identical text.
+Scenario-family grouping remains unchanged.
