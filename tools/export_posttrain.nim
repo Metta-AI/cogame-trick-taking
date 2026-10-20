@@ -34,9 +34,13 @@ when isMainModule:
   doAssert not variantConfig.isNil
   var trainRows, validationRows: seq[string]
   var runs = newJArray()
+  var wordingCounts: array[2, int]
   for seed in firstSeed ..< firstSeed + matches:
-    let selection = PromptSelection(variant: initialSelection.variant,
-      seed: initialSelection.seed + seed - firstSeed)
+    var selection = initialSelection
+    let splitIndex = ord(seed mod 5 == 0)
+    if selection.variant == pvMixed:
+      selection.seed += wordingCounts[splitIndex]
+      inc wordingCounts[splitIndex]
     var config = defaultGameConfig()
     let runtimeConfig = copy(variantConfig)
     runtimeConfig["tokens"] = newJArray()
@@ -47,7 +51,8 @@ when isMainModule:
     config.update($runtimeConfig)
     config = sampleEpisode(config)
     var sim = initSim(config)
-    let episode = "trick-taking-" & variant & "-" & $seed
+    let episode = "trick-taking-" & variant & "-" & $seed & "-" &
+      $selection.selectedVariant & "-" & $selection.seed
     let seedFamily = "trick-taking-" & $seed
     let trajectory = newDecisionTrajectory(episode, seedFamily, "trick-taking",
       sourceRevision, sourceRevision)

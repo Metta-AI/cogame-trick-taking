@@ -75,11 +75,14 @@ wordings and rule modules for the same game seed stay in the same split. Each
 manifest run records its selected prompt bank, wording and independent seed.
 
 Append PROMPT_VARIANT [PROMPT_SEED] after the variant to select wording. Mixed
-selection advances the prompt seed once per exported episode.
+selection cycles independently within training and validation, so both splits
+can contain every training wording. Fixed wordings retain the supplied prompt
+seed. Episode IDs and trajectory filenames include the selected wording and
+prompt seed; seed-family grouping stays unchanged.
 Held-out wordings are rejected before creating outputs. Files use umask 077,
 episode writes are exclusive, and existing destinations are refused.
 
-Use the current [Metta post-training workflow](https://github.com/Metta-AI/metta/tree/main/packages/metta-posttraining)
+Use the current [Metta post-training workflow](https://github.com/Metta-AI/posttraining-research/tree/main/packages/metta-posttraining)
 to import and independently review complete episodes, then split by seed family
 before exporting selected training examples.
 Runtime, training, and evaluation must use the same manifest variant,
